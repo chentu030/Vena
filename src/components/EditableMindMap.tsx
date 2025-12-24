@@ -9,16 +9,37 @@ import {
     Node,
     Panel,
     ConnectionMode,
+    getNodesBounds,
+    getViewportForBounds,
+    useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Plus, Trash, Edit2, Layers, Link2Off } from 'lucide-react';
+import { Plus, Trash, Edit2, Layers, Link2Off, StickyNote, Type, BookOpen, Download, Image as ImageIcon, FileImage } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import MindMapNode from './MindMapNode';
+import StickyNoteNode from './StickyNoteNode';
+import DescriptionNode from './DescriptionNode';
+import ReferenceNode from './ReferenceNode';
 
 // Define Node Types
 const nodeTypes = {
     mindMap: MindMapNode,
+    stickyNote: StickyNoteNode,
+    description: DescriptionNode,
+    reference: ReferenceNode,
 };
+
+const PRESET_COLORS = [
+    '#ffffff', // White
+    '#ffcccc', // Red
+    '#ffe6cc', // Orange
+    '#ffffcc', // Yellow
+    '#ccffcc', // Green
+    '#ccffff', // Cyan
+    '#ccccff', // Blue
+    '#e6ccff', // Purple
+    '#f5f5f5', // Grey
+];
 
 interface EditableMindMapProps {
     nodes: Node[];
@@ -30,6 +51,7 @@ interface EditableMindMapProps {
     onNodeDoubleClick?: (id: string, label: string) => void;
     setNodes: React.Dispatch<React.SetStateAction<Node[]>>;
     setEdges: React.Dispatch<React.SetStateAction<Edge[]>>;
+    availableGroups?: any[];
 }
 
 export default function EditableMindMap({
@@ -41,39 +63,300 @@ export default function EditableMindMap({
     onNodeClick,
     onNodeDoubleClick,
     setNodes,
-    setEdges
+    setEdges,
+    availableGroups = []
 }: EditableMindMapProps) {
+    const { getNodes } = useReactFlow();
+    const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
+    const [selectionDownloadMenuOpen, setSelectionDownloadMenuOpen] = useState(false);
+
+    // Download Image - Simple direct capture
+    const downloadImage = async (targetNodes: Node[], format: 'png' | 'jpeg' | 'svg' = 'png', fileName: string = 'mind-map') => {
+        if (!ref.current) return;
+
+        const nodesBounds = getNodesBounds(targetNodes);
+        const padding = 50;
+        const imageWidth = nodesBounds.width + padding * 2;
+        const imageHeight = nodesBounds.height + padding * 2;
+
+        const transform = getViewportForBounds(
+            nodesBounds,
+            imageWidth,
+            imageHeight,
+            0.5,
+            2,
+            padding / imageWidth
+        );
+
+        // Temporarily deselect all nodes
+        const previouslySelectedNodeIds = nodes.filter(n => n.selected).map(n => n.id);
+        if (previouslySelectedNodeIds.length > 0) {
+            setNodes(nds => nds.map(n => ({ ...n, selected: false })));
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 200));
+
+        const viewportEl = ref.current.querySelector('.react-flow__viewport') as HTMLElement;
+        if (!viewportEl) {
+            if (previouslySelectedNodeIds.length > 0) {
+                setNodes(nds => nds.map(n => ({ ...n, selected: previouslySelectedNodeIds.includes(n.id) })));
+            }
+            return;
+        }
+
+        // Store original transform
+        const originalTransform = viewportEl.style.transform;
+
+        try {
+            // Apply export transform
+            viewportEl.style.transform = `translate(${transform.x}px, ${transform.y}px) scale(${transform.zoom})`;
+
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            const { toPng, toJpeg, toSvg } = await import('html-to-image');
+
+            const options = {
+                backgroundColor: '#f9fafb',
+                width: imageWidth,
+                height: imageHeight,
+                pixelRatio: 2,
+                filter: (node: any) => {
+                    if (node.classList) {
+                        const exclude = ['react-flow__minimap', 'react-flow__controls', 'react-flow__panel',
+                            'react-flow__resize-control', 'react-flow__nodesselection',
+                            'react-flow__attribution'];
+                        for (const cls of exclude) {
+                            if (node.classList.contains(cls)) return false;
+                        }
+                    }
+                    return true;
+                },
+            };
+
+            let dataUrl: string;
+            if (format === 'svg') {
+                dataUrl = await toSvg(viewportEl, options);
+            } else if (format === 'jpeg') {
+                dataUrl = await toJpeg(viewportEl, { ...options, quality: 0.95 });
+            } else {
+                dataUrl = await toPng(viewportEl, options);
+            }
+
+            // Restore original transform
+            viewportEl.style.transform = originalTransform;
+
+            const a = document.createElement('a');
+            a.setAttribute('download', `${fileName}.${format}`);
+            a.setAttribute('href', dataUrl);
+            a.click();
+        } catch (error) {
+            console.error('Failed to export image:', error);
+            // Restore transform on error
+            viewportEl.style.transform = originalTransform;
+            alert('匯出失敗，請使用瀏覽器截圖功能');
+        } finally {
+            if (previouslySelectedNodeIds.length > 0) {
+                setNodes(nds => nds.map(n => ({ ...n, selected: previouslySelectedNodeIds.includes(n.id) })));
+            }
+            setDownloadMenuOpen(false);
+            setSelectionDownloadMenuOpen(false);
+        }
+    };
+
+    // Sync availableGroups to Reference nodes data
+    // This ensures Reference nodes always have the latest groups even after async load
+    useEffect(() => {
+        // Only run if we have groups to sync
+        if (!availableGroups || availableGroups.length === 0) return;
+
+        setNodes((nds) => {
+            const groupsStr = JSON.stringify(availableGroups);
+
+            // Check if ANY reference node needs updating (missing groups or stale groups)
+            const needsUpdate = nds.some(n => {
+                if (n.type !== 'reference') return false;
+                const currentGroups = n.data.availableGroups as any[] | undefined;
+                // Update if no groups, empty groups, or different groups
+                if (!currentGroups || currentGroups.length === 0) return true;
+                return JSON.stringify(currentGroups) !== groupsStr;
+            });
+
+            if (!needsUpdate) return nds;
+
+            console.log('Syncing availableGroups to Reference nodes:', availableGroups.length, 'groups');
+            return nds.map((node) => {
+                if (node.type === 'reference') {
+                    return {
+                        ...node,
+                        data: {
+                            ...node.data,
+                            availableGroups: availableGroups
+                        }
+                    };
+                }
+                return node;
+            });
+        });
+    }, [availableGroups, setNodes]);
 
     // Context Menu State
     const [menu, setMenu] = useState<{ id: string; type: 'node' | 'edge'; top: number; left: number; direction?: string } | null>(null);
     const ref = useRef<HTMLDivElement>(null);
 
-    // Batch Add Modal State
     const [batchAddModal, setBatchAddModal] = useState<{ parentId: string; direction: string } | null>(null);
     const [batchAddCount, setBatchAddCount] = useState(3);
+    const [batchNodeType, setBatchNodeType] = useState<'mindMap' | 'reference' | 'description'>('mindMap');
+
+    // Custom Colors State
+    const [savedColors, setSavedColors] = useState<string[]>([]);
+    const [lastCustomColor, setLastCustomColor] = useState<string | null>(null);
+
+    useEffect(() => {
+        const saved = localStorage.getItem('mindmap_custom_colors');
+        if (saved) {
+            try {
+                setSavedColors(JSON.parse(saved));
+            } catch (e) {
+                console.error("Failed to load saved colors", e);
+            }
+        }
+    }, []);
+
+    const saveCustomColor = (color: string) => {
+        if (!PRESET_COLORS.includes(color) && !savedColors.includes(color)) {
+            const newColors = [...savedColors, color];
+            setSavedColors(newColors);
+            localStorage.setItem('mindmap_custom_colors', JSON.stringify(newColors));
+        }
+        setLastCustomColor(null);
+    };
+
+    const deleteCustomColor = (e: React.MouseEvent, color: string) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const newColors = savedColors.filter(c => c !== color);
+        setSavedColors(newColors);
+        localStorage.setItem('mindmap_custom_colors', JSON.stringify(newColors));
+    };
+
+    // Internal handler to apply color
+    const applyColor = (color: string) => {
+        // Logic to apply to selected nodes or menu target
+        const targetIds = new Set<string>();
+
+        if (menu && menu.type === 'node') {
+            targetIds.add(menu.id);
+            // If the menu target is also part of selection, apply to all selected
+            const targetNode = nodes.find(n => n.id === menu.id);
+            if (targetNode && targetNode.selected) {
+                nodes.filter(n => n.selected).forEach(n => targetIds.add(n.id));
+            }
+        } else {
+            // Toolbar action - apply to selection
+            nodes.filter(n => n.selected).forEach(n => targetIds.add(n.id));
+        }
+
+        if (targetIds.size > 0) {
+            setNodes((nds) => nds.map(n => {
+                if (targetIds.has(n.id)) {
+                    return {
+                        ...n,
+                        style: { ...n.style, background: 'transparent', border: 'none' },
+                        data: { ...n.data, color }
+                    };
+                }
+                return n;
+            }));
+        }
+        setMenu(null);
+    };
+
+    const handleCustomColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const color = e.target.value;
+        setLastCustomColor(color);
+        applyColor(color);
+    };
 
     // Derived Selection State from Props (Source of Truth)
     const selectedNodes = nodes.filter(n => n.selected);
     const selectedEdges = edges.filter(e => e.selected);
 
-    const onLabelChange = useCallback((id: string, newLabel: string) => {
+    const onLabelChange = useCallback((id: string, newLabel: string, keepEditing: boolean = false) => {
         setNodes((nds) => nds.map((n) => {
             if (n.id === id) {
                 return {
                     ...n,
-                    data: { ...n.data, label: newLabel, isEditing: false }
+                    data: { ...n.data, label: newLabel, isEditing: keepEditing }
                 };
             }
             return n;
         }));
     }, [setNodes]);
 
+    // State for React Flow Instance
+    const [rfInstance, setRfInstance] = useState<any>(null);
+
+    const getCenterPosition = () => {
+        if (!rfInstance || !ref.current) {
+            return { x: Math.random() * 400 + 100, y: Math.random() * 400 + 100 };
+        }
+        const { left, top, width, height } = ref.current.getBoundingClientRect();
+        const centerX = left + width / 2;
+        const centerY = top + height / 2;
+
+        // Project screen center to flow coordinates
+        const position = rfInstance.screenToFlowPosition({ x: centerX, y: centerY });
+
+        // Add slight random offset to prevent perfect stacking
+        return {
+            x: position.x + (Math.random() * 40 - 20),
+            y: position.y + (Math.random() * 40 - 20)
+        };
+    };
+
     const handleAddNode = () => {
+        const { x, y } = getCenterPosition();
         const newNode: Node = {
             id: uuidv4(),
             type: 'mindMap',
-            position: { x: Math.random() * 400 + 100, y: Math.random() * 400 + 100 },
+            position: { x, y },
             data: { label: 'New Node', onLabelChange, color: '#ffffff' },
+            style: { background: 'transparent', border: 'none' },
+        };
+        setNodes((nds) => [...nds, newNode]);
+    };
+
+    const handleAddStickyNote = () => {
+        const { x, y } = getCenterPosition();
+        const newNode: Node = {
+            id: uuidv4(),
+            type: 'stickyNote',
+            position: { x, y },
+            data: { label: 'Sticky Note', onLabelChange, color: '#fef3c7' }, // Default yellow
+            style: { background: 'transparent', border: 'none' },
+        };
+        setNodes((nds) => [...nds, newNode]);
+    };
+
+    const handleAddDescription = () => {
+        const { x, y } = getCenterPosition();
+        const newNode: Node = {
+            id: uuidv4(),
+            type: 'description',
+            position: { x, y },
+            data: { label: 'Add description...', onLabelChange, color: '#6b7280' },
+            style: { background: 'transparent', border: 'none' },
+        };
+        setNodes((nds) => [...nds, newNode]);
+    };
+
+    const handleAddReference = () => {
+        const { x, y } = getCenterPosition();
+        const newNode: Node = {
+            id: uuidv4(),
+            type: 'reference',
+            position: { x, y },
+            data: { label: 'New Reference', onLabelChange, referenceType: 'paper', color: '#faf5ff' },
             style: { background: 'transparent', border: 'none' },
         };
         setNodes((nds) => [...nds, newNode]);
@@ -164,8 +447,17 @@ export default function EditableMindMap({
 
     const onNodeDoubleClickInternal = (event: React.MouseEvent, node: Node) => {
         setMenu(null);
-        if (onNodeDoubleClick) {
-            onNodeDoubleClick(node.id, node.data.label as string);
+        if (node.type === 'stickyNote' || node.type === 'description' || node.type === 'reference') {
+            // Sticky Note, Description & Reference: Double click to edit
+            setNodes((nds) => nds.map(n => {
+                if (n.id === node.id) return { ...n, data: { ...n.data, isEditing: true } };
+                return n;
+            }));
+        } else {
+            // Normal Node: Double click to open chat
+            if (onNodeDoubleClick) {
+                onNodeDoubleClick(node.id, node.data.label as string);
+            }
         }
     };
 
@@ -184,12 +476,12 @@ export default function EditableMindMap({
         if (menu) {
             if (menu.type === 'edge') {
                 setEdges((eds) => eds.filter(e => e.id !== menu.id));
+            } else if (menu.id === 'selection') {
+                handleToolbarDelete();
             } else {
                 const targetNode = nodes.find(n => n.id === menu.id);
                 if (targetNode && targetNode.selected) {
-                    const selectedIds = new Set(nodes.filter(n => n.selected).map(n => n.id));
-                    setNodes((nds) => nds.filter((n) => !selectedIds.has(n.id)));
-                    setEdges((eds) => eds.filter((e) => !selectedIds.has(e.source) && !selectedIds.has(e.target)));
+                    handleToolbarDelete();
                 } else {
                     setNodes((nds) => nds.filter((n) => n.id !== menu.id));
                     setEdges((eds) => eds.filter((e) => e.source !== menu.id && e.target !== menu.id));
@@ -246,6 +538,7 @@ export default function EditableMindMap({
             // Open modal instead of window.prompt
             setBatchAddModal({ parentId: menu.id, direction: dir });
             setBatchAddCount(3); // Reset to default
+            setBatchNodeType('mindMap'); // Reset to default
             setMenu(null);
         }
     };
@@ -257,41 +550,82 @@ export default function EditableMindMap({
         const parentNode = nodes.find(n => n.id === batchAddModal.parentId);
         const dir = batchAddModal.direction;
         const count = batchAddCount;
+        const type = batchNodeType;
 
         if (parentNode && count > 0) {
             const newNodes: Node[] = [];
             const newEdges: Edge[] = [];
-            const gapX = 200;
-            const gapY = 60;
+            const isReference = type === 'reference';
+            const parentIsReference = parentNode.type === 'reference';
+
+            // Get parent dimensions (measured or fallback)
+            const parentWidth = parentNode.measured?.width || (parentIsReference ? 350 : 160);
+            const parentHeight = parentNode.measured?.height || (parentIsReference ? 250 : 40);
+            const parentCenterY = parentNode.position.y + parentHeight / 2;
+            const parentCenterX = parentNode.position.x + parentWidth / 2;
+
+            // Increase gaps for reference nodes as they are larger
+            const gapX = isReference ? 400 : 250;
+            const gapY = isReference ? 120 : 60;
+            const horizontalSpan = isReference ? 300 : 180;
+
             let startX = parentNode.position.x;
             let startY = parentNode.position.y;
 
-            if (dir === 'right') startX += gapX;
-            if (dir === 'left') startX -= gapX;
-            if (dir === 'bottom') startY += 100;
-            if (dir === 'top') startY -= 100;
+            if (dir === 'right') {
+                startX = parentNode.position.x + parentWidth + (isReference ? 100 : 80);
+                startY = parentCenterY;
+            }
+            if (dir === 'left') {
+                startX = parentNode.position.x - gapX;
+                startY = parentCenterY;
+            }
+            if (dir === 'bottom') {
+                startX = parentCenterX;
+                startY = parentNode.position.y + parentHeight + (isReference ? 100 : 60);
+            }
+            if (dir === 'top') {
+                startX = parentCenterX;
+                startY = parentNode.position.y - (isReference ? 150 : 100);
+            }
 
             const isVerticalStack = dir === 'right' || dir === 'left';
-            const totalSpan = isVerticalStack ? count * gapY : count * 160;
-            const startOffset = -(totalSpan / 2) + (isVerticalStack ? gapY / 2 : 80);
+            const totalSpan = isVerticalStack ? count * gapY : count * horizontalSpan;
+            const startOffset = -(totalSpan / 2) + (isVerticalStack ? gapY / 2 : horizontalSpan / 2);
 
             for (let i = 0; i < count; i++) {
                 let x = startX;
                 let y = startY;
 
                 if (isVerticalStack) {
-                    y = parentNode.position.y + startOffset + (i * gapY);
+                    y = startY + startOffset + (i * gapY);
                 } else {
-                    x = parentNode.position.x + startOffset + (i * 160);
+                    x = startX + startOffset + (i * horizontalSpan);
                 }
 
                 const nodeId = uuidv4();
+
+                let newNodeData: any = { label: `Node ${i + 1}`, onLabelChange, color: '#ffffff' };
+                let newNodeStyle = { background: 'transparent', border: 'none' };
+
+                if (type === 'reference') {
+                    newNodeData = {
+                        label: 'New Reference',
+                        onLabelChange,
+                        referenceType: 'paper',
+                        color: '#faf5ff',
+                        availableGroups: availableGroups // Ensure groups are passed initially
+                    };
+                } else if (type === 'description') {
+                    newNodeData = { label: 'Description...', onLabelChange, color: '#6b7280' };
+                }
+
                 newNodes.push({
                     id: nodeId,
-                    type: 'mindMap',
+                    type: type,
                     position: { x, y },
-                    data: { label: `Node ${i + 1}`, onLabelChange, color: '#ffffff' },
-                    style: { background: 'transparent', border: 'none' },
+                    data: newNodeData,
+                    style: newNodeStyle,
                 });
 
                 let sourceHandle = 'right';
@@ -428,9 +762,9 @@ export default function EditableMindMap({
                 onNodeContextMenu={onNodeContextMenu}
                 onEdgeContextMenu={onEdgeContextMenu}
                 onNodeDoubleClick={onNodeDoubleClickInternal}
-                // onSelectionChange is no longer needed for state, ReactFlow updates nodes directly with selected: true
                 onPaneClick={onPaneClick}
                 onPaneContextMenu={onPaneContextMenu}
+                onInit={setRfInstance} // Capture instance
                 nodeTypes={nodeTypes}
                 fitView
                 connectionMode={ConnectionMode.Loose}
@@ -452,6 +786,47 @@ export default function EditableMindMap({
                     <button onClick={handleAddNode} className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded transition" title="Add Node">
                         <Plus size={16} />
                     </button>
+                    <button onClick={handleAddStickyNote} className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded transition" title="Add Sticky Note">
+                        <StickyNote size={16} />
+                    </button>
+                    <button onClick={handleAddDescription} className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded transition" title="Add Description Text">
+                        <Type size={16} />
+                    </button>
+                    <button onClick={handleAddReference} className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded transition" title="Add Reference/Database">
+                        <BookOpen size={16} />
+                    </button>
+
+                    {/* Divider */}
+                    <div className="w-px bg-neutral-200 dark:bg-neutral-700 mx-1"></div>
+
+                    {/* Download Full Map Button */}
+                    <div className="relative">
+                        <button
+                            onClick={() => setDownloadMenuOpen(!downloadMenuOpen)}
+                            className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded transition flex items-center gap-1"
+                            title="Download Map"
+                        >
+                            <Download size={16} />
+                        </button>
+
+                        {downloadMenuOpen && (
+                            <div className="absolute top-full right-0 mt-2 bg-white dark:bg-neutral-800 border border-border rounded-lg shadow-xl p-1 flex flex-col min-w-[120px] z-50">
+                                <button onClick={() => downloadImage(nodes, 'png', 'mind-map')} className="px-3 py-2 text-sm text-left hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded flex items-center gap-2">
+                                    <ImageIcon size={14} /> PNG
+                                </button>
+                                <button onClick={() => downloadImage(nodes, 'jpeg', 'mind-map')} className="px-3 py-2 text-sm text-left hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded flex items-center gap-2">
+                                    <FileImage size={14} /> JPG
+                                </button>
+                                <button onClick={() => downloadImage(nodes, 'svg', 'mind-map')} className="px-3 py-2 text-sm text-left hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded flex items-center gap-2">
+                                    <Layers size={14} /> SVG
+                                </button>
+                            </div>
+                        )}
+                        {/* Overlay to close menu */}
+                        {downloadMenuOpen && (
+                            <div className="fixed inset-0 z-40" onClick={() => setDownloadMenuOpen(false)}></div>
+                        )}
+                    </div>
                 </Panel>
 
                 {/* Selection Toolbar */}
@@ -464,13 +839,50 @@ export default function EditableMindMap({
 
                             {selectedNodes.length > 0 && (
                                 <>
-                                    <div className="flex -space-x-1">
-                                        <button onClick={() => handleToolbarColor('#ffffff')} className="w-5 h-5 rounded-full bg-white border border-neutral-200 shadow-sm hover:scale-110 hover:z-10 transition" title="White"></button>
-                                        <button onClick={() => handleToolbarColor('#ffcccc')} className="w-5 h-5 rounded-full bg-red-200 border border-neutral-200 shadow-sm hover:scale-110 hover:z-10 transition" title="Red"></button>
-                                        <button onClick={() => handleToolbarColor('#ccffcc')} className="w-5 h-5 rounded-full bg-green-200 border border-neutral-200 shadow-sm hover:scale-110 hover:z-10 transition" title="Green"></button>
-                                        <button onClick={() => handleToolbarColor('#ccccff')} className="w-5 h-5 rounded-full bg-blue-200 border border-neutral-200 shadow-sm hover:scale-110 hover:z-10 transition" title="Blue"></button>
+                                    <div className="grid grid-cols-3 gap-1.5">
+                                        {[...PRESET_COLORS, ...savedColors].map(color => (
+                                            <div key={color} className="relative group/color">
+                                                <button
+                                                    onClick={() => applyColor(color)}
+                                                    className="w-5 h-5 rounded-full border border-neutral-200 shadow-sm hover:scale-110 hover:z-10 transition ring-offset-1 focus:ring-2"
+                                                    style={{ backgroundColor: color }}
+                                                    title={color}
+                                                />
+                                                {savedColors.includes(color) && (
+                                                    <button
+                                                        onClick={(e) => deleteCustomColor(e, color)}
+                                                        className="absolute -top-2 -right-2 hidden group-hover/color:flex bg-red-500 text-white rounded-full w-4 h-4 items-center justify-center text-[10px] shadow-sm z-20"
+                                                        title="Remove color"
+                                                    >
+                                                        ×
+                                                    </button>
+                                                )}
+                                            </div>
+                                        ))}
+
+                                        {/* Color Picker Input */}
+                                        <div className="relative w-5 h-5 rounded-full overflow-hidden border border-neutral-300 shadow-sm hover:scale-110 transition cursor-pointer group bg-white">
+                                            <div className="absolute inset-0 bg-gradient-to-br from-red-400 via-green-400 to-blue-400 opacity-50"></div>
+                                            <input
+                                                type="color"
+                                                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full p-0 border-0"
+                                                onChange={handleCustomColorChange}
+                                                title="Pick Custom Color"
+                                            />
+                                        </div>
+
+                                        {/* Add Button - Only shows when lastCustomColor is active and not saved */}
+                                        {lastCustomColor && !savedColors.includes(lastCustomColor) && !PRESET_COLORS.includes(lastCustomColor) && (
+                                            <button
+                                                onClick={() => saveCustomColor(lastCustomColor)}
+                                                className="w-5 h-5 rounded-full border border-dashed border-neutral-400 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 flex items-center justify-center transition shadow-sm"
+                                                title="Save Current Color"
+                                            >
+                                                <span className="text-xs font-bold leading-none mb-px">+</span>
+                                            </button>
+                                        )}
                                     </div>
-                                    <div className="w-px h-4 bg-border mx-1"></div>
+                                    <div className="w-px h-6 bg-border mx-1"></div>
                                 </>
                             )}
 
@@ -488,6 +900,29 @@ export default function EditableMindMap({
                                 <Trash size={16} />
                                 <span className="text-xs font-medium">Delete</span>
                             </button>
+
+                            <div className="w-px h-6 bg-border mx-1"></div>
+
+                            {/* Download Selection */}
+                            <div className="relative">
+                                <button
+                                    onClick={() => setSelectionDownloadMenuOpen(!selectionDownloadMenuOpen)}
+                                    className="p-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-600 rounded transition flex items-center gap-1"
+                                    title="Download Selection"
+                                >
+                                    <Download size={16} />
+                                </button>
+                                {selectionDownloadMenuOpen && (
+                                    <div className="absolute top-full right-0 mt-2 bg-white dark:bg-neutral-800 border border-border rounded-lg shadow-xl p-1 flex flex-col min-w-[100px] z-50">
+                                        <button onClick={() => downloadImage(selectedNodes, 'png', 'selection')} className="px-2 py-1.5 text-xs text-left hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded">Export PNG</button>
+                                        <button onClick={() => downloadImage(selectedNodes, 'jpeg', 'selection')} className="px-2 py-1.5 text-xs text-left hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded">Export JPG</button>
+                                        <button onClick={() => downloadImage(selectedNodes, 'svg', 'selection')} className="px-2 py-1.5 text-xs text-left hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded">Export SVG</button>
+                                    </div>
+                                )}
+                                {selectionDownloadMenuOpen && (
+                                    <div className="fixed inset-0 z-40" onClick={() => setSelectionDownloadMenuOpen(false)}></div>
+                                )}
+                            </div>
                         </div>
                     </Panel>
                 )}
@@ -529,11 +964,45 @@ export default function EditableMindMap({
                         {menu.type === 'node' && (
                             <>
                                 <div className="h-px bg-border my-1"></div>
-                                <div className="flex justify-between px-2 py-1">
-                                    <button onClick={() => handleMenuColor('#ffffff')} className="w-6 h-6 rounded-full bg-white border border-neutral-200 shadow-sm hover:scale-110 transition"></button>
-                                    <button onClick={() => handleMenuColor('#ffcccc')} className="w-6 h-6 rounded-full bg-red-200 border border-neutral-200 shadow-sm hover:scale-110 transition"></button>
-                                    <button onClick={() => handleMenuColor('#ccffcc')} className="w-6 h-6 rounded-full bg-green-200 border border-neutral-200 shadow-sm hover:scale-110 transition"></button>
-                                    <button onClick={() => handleMenuColor('#ccccff')} className="w-6 h-6 rounded-full bg-blue-200 border border-neutral-200 shadow-sm hover:scale-110 transition"></button>
+                                <div className="grid grid-cols-3 gap-1.5 px-2 py-1">
+                                    {[...PRESET_COLORS, ...savedColors].map(color => (
+                                        <div key={color} className="relative group/color">
+                                            <button
+                                                onClick={() => applyColor(color)}
+                                                className="w-5 h-5 rounded-full border border-neutral-200 shadow-sm hover:scale-110 transition"
+                                                style={{ backgroundColor: color }}
+                                            />
+                                            {savedColors.includes(color) && (
+                                                <button
+                                                    onClick={(e) => deleteCustomColor(e, color)}
+                                                    className="absolute -top-1 -right-1 hidden group-hover/color:flex bg-red-500 text-white rounded-full w-3 h-3 items-center justify-center text-[8px] shadow-sm z-20"
+                                                >
+                                                    ×
+                                                </button>
+                                            )}
+                                        </div>
+                                    ))}
+                                    {/* Color Picker Input Context Menu */}
+                                    <div className="relative w-5 h-5 rounded-full overflow-hidden border border-neutral-300 shadow-sm hover:scale-110 transition cursor-pointer group bg-white">
+                                        <div className="absolute inset-0 bg-gradient-to-br from-red-400 via-green-400 to-blue-400 opacity-50"></div>
+                                        <input
+                                            type="color"
+                                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full p-0 border-0"
+                                            onChange={handleCustomColorChange}
+                                            title="Pick Custom Color"
+                                        />
+                                    </div>
+
+                                    {/* Add Button - Context Menu */}
+                                    {lastCustomColor && !savedColors.includes(lastCustomColor) && !PRESET_COLORS.includes(lastCustomColor) && (
+                                        <button
+                                            onClick={() => saveCustomColor(lastCustomColor)}
+                                            className="w-5 h-5 rounded-full border border-dashed border-neutral-400 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 flex items-center justify-center transition shadow-sm"
+                                            title="Save Current Color"
+                                        >
+                                            <span className="text-xs font-bold leading-none mb-px">+</span>
+                                        </button>
+                                    )}
                                 </div>
                             </>
                         )}
@@ -564,6 +1033,21 @@ export default function EditableMindMap({
                                 className="w-full px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-neutral-800 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
                                 autoFocus
                             />
+                        </div>
+
+                        <div className="mb-6">
+                            <label className="block text-sm font-medium mb-2 text-neutral-700 dark:text-neutral-300">
+                                Node Type
+                            </label>
+                            <select
+                                value={batchNodeType}
+                                onChange={(e) => setBatchNodeType(e.target.value as any)}
+                                className="w-full px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-neutral-800 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+                            >
+                                <option value="mindMap">Standard Node</option>
+                                <option value="reference">Reference / Paper</option>
+                                <option value="description">Description Text</option>
+                            </select>
                         </div>
                         <div className="flex gap-3 justify-end">
                             <button

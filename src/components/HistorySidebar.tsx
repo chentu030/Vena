@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, FileText, Map as MapIcon, Trash2, Clock, Save, MessageSquare, Pencil, Plus } from 'lucide-react';
+import { X, FileText, Map as MapIcon, Trash2, Clock, Save, MessageSquare, Pencil, Plus, Search } from 'lucide-react';
 
 interface HistoryItem {
     id: string;
@@ -19,8 +19,15 @@ interface HistorySidebarProps {
     onDeleteDraft: (id: string) => void;
     onDeleteMap: (id: string) => void;
     onDeleteChats?: (id: string) => void;
-    onRename: (type: 'draft' | 'map' | 'chat', id: string, newTitle: string) => void;
+    onRename: (type: 'draft' | 'map' | 'chat' | 'manuscript' | 'research', id: string, newTitle: string) => void;
     onNewDraft: () => void;
+    savedManuscripts?: HistoryItem[];
+    onLoadManuscript?: (id: string) => void;
+    onDeleteManuscript?: (id: string) => void;
+    onNewManuscript?: () => void;
+    savedResearch?: HistoryItem[];
+    onLoadResearch?: (id: string) => void;
+    onDeleteResearch?: (id: string) => void;
 }
 
 const HistorySidebar: React.FC<HistorySidebarProps> = ({
@@ -34,9 +41,94 @@ const HistorySidebar: React.FC<HistorySidebarProps> = ({
     onLoadChats,
     onDeleteDraft,
     onDeleteMap,
-    onDeleteChats
+    onDeleteChats,
+    onRename,
+    onNewDraft,
+    savedManuscripts = [],
+    onLoadManuscript,
+    onDeleteManuscript,
+    onNewManuscript,
+    savedResearch = [],
+    onLoadResearch,
+    onDeleteResearch
 }) => {
-    const [activeTab, setActiveTab] = useState<'drafts' | 'maps' | 'chats'>('drafts');
+    const [activeTab, setActiveTab] = useState<'drafts' | 'maps' | 'chats' | 'manuscripts' | 'research'>('manuscripts');
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editTitle, setEditTitle] = useState('');
+
+    const startEditing = (e: React.MouseEvent, item: HistoryItem) => {
+        e.stopPropagation();
+        setEditingId(item.id);
+        setEditTitle(item.title);
+    };
+
+    const saveEdit = (e: React.MouseEvent | React.KeyboardEvent, type: 'draft' | 'map' | 'chat' | 'manuscript' | 'research', id: string) => {
+        e.stopPropagation();
+        if (editTitle.trim()) {
+            onRename(type, id, editTitle.trim());
+        }
+        setEditingId(null);
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent, type: 'draft' | 'map' | 'chat' | 'manuscript' | 'research', id: string) => {
+        if (e.key === 'Enter') {
+            saveEdit(e, type, id);
+        } else if (e.key === 'Escape') {
+            setEditingId(null);
+        }
+    };
+
+    const renderItem = (item: HistoryItem, type: 'draft' | 'map' | 'chat' | 'manuscript' | 'research', onLoad: (id: string) => void, onDelete: (id: string) => void) => {
+        const isEditing = editingId === item.id;
+
+        return (
+            <div key={item.id} className="group relative bg-white dark:bg-neutral-900 border border-border/50 rounded-xl p-3 hover:shadow-md transition-all cursor-pointer" onClick={() => !isEditing && onLoad(item.id)}>
+                <div className="flex justify-between items-start mb-1">
+                    {isEditing ? (
+                        <input
+                            type="text"
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            onKeyDown={(e) => handleKeyDown(e, type, item.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex-1 bg-transparent border-b border-blue-500 outline-none text-sm font-medium mr-2"
+                            autoFocus
+                            onBlur={() => setEditingId(null)}
+                        />
+                    ) : (
+                        <h3 className="font-medium text-sm line-clamp-2 pr-16">{item.title || `Untitled ${type}`}</h3>
+                    )}
+
+                    <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {!isEditing && (
+                            <button
+                                onClick={(e) => startEditing(e, item)}
+                                className="p-1.5 text-muted-foreground hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-md transition-all"
+                            >
+                                <Pencil size={14} />
+                            </button>
+                        )}
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onDelete(item.id); }}
+                            className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-all"
+                        >
+                            <Trash2 size={14} />
+                        </button>
+                    </div>
+                </div>
+                <div className="flex justify-between items-center mt-2">
+                    <span className="text-[10px] text-muted-foreground">
+                        {item.date ? new Date(item.date).toLocaleDateString() : 'Unknown date'}
+                    </span>
+                    {(item as any).createdAt && (
+                        <span className="text-[10px] text-muted-foreground/50" title="Created At">
+                            {new Date((item as any).createdAt).toLocaleTimeString()}
+                        </span>
+                    )}
+                </div>
+            </div>
+        );
+    };
 
     return (
         <div
@@ -57,91 +149,58 @@ const HistorySidebar: React.FC<HistorySidebarProps> = ({
             </div>
 
             {/* Tabs */}
-            <div className="p-4 grid grid-cols-3 gap-2 shrink-0">
+            <div className="p-4 grid grid-cols-2 gap-1 shrink-0">
+
                 <button
                     onClick={() => setActiveTab('drafts')}
                     className={`flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === 'drafts' ? 'bg-neutral-900 text-white dark:bg-white dark:text-black shadow-md' : 'bg-neutral-100 dark:bg-neutral-800 text-muted-foreground hover:text-foreground'}`}
+                    title="Drafts"
                 >
-                    <FileText size={14} /> Drafts
+                    <FileText size={14} /> Draft
                 </button>
-                <button
-                    onClick={() => setActiveTab('maps')}
-                    className={`flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === 'maps' ? 'bg-neutral-900 text-white dark:bg-white dark:text-black shadow-md' : 'bg-neutral-100 dark:bg-neutral-800 text-muted-foreground hover:text-foreground'}`}
-                >
-                    <MapIcon size={14} /> Maps
-                </button>
+
                 <button
                     onClick={() => setActiveTab('chats')}
                     className={`flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === 'chats' ? 'bg-neutral-900 text-white dark:bg-white dark:text-black shadow-md' : 'bg-neutral-100 dark:bg-neutral-800 text-muted-foreground hover:text-foreground'}`}
+                    title="Chats"
                 >
-                    <MessageSquare size={14} /> Chats
+                    <MessageSquare size={14} /> Chat
                 </button>
             </div>
 
+            {/* New Button Area */}
+            {activeTab === 'drafts' && (
+                <div className="px-4 pb-2">
+                    <button onClick={onNewDraft} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-border hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-sm font-medium text-muted-foreground hover:text-foreground">
+                        <Plus size={14} /> New Draft
+                    </button>
+                </div>
+            )}
+
+
             {/* List */}
             <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-3">
+
+
                 {activeTab === 'drafts' && (
                     savedDrafts.length === 0 ? (
                         <div className="text-center text-muted-foreground text-sm py-10">No saved drafts</div>
                     ) : (
-                        savedDrafts.map(item => (
-                            <div key={item.id} className="group relative bg-white dark:bg-neutral-900 border border-border/50 rounded-xl p-3 hover:shadow-md transition-all cursor-pointer" onClick={() => onLoadDraft(item.id)}>
-                                <div className="flex justify-between items-start mb-1">
-                                    <h3 className="font-medium text-sm line-clamp-2 pr-6">{item.title || 'Untitled Draft'}</h3>
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); onDeleteDraft(item.id); }}
-                                        className="opacity-0 group-hover:opacity-100 p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-all absolute top-2 right-2"
-                                    >
-                                        <Trash2 size={14} />
-                                    </button>
-                                </div>
-                                <span className="text-xs text-muted-foreground">{new Date(item.date).toLocaleString()}</span>
-                            </div>
-                        ))
+                        savedDrafts.map(item => renderItem(item, 'draft', onLoadDraft, onDeleteDraft))
                     )
                 )}
 
-                {activeTab === 'maps' && (
-                    savedMaps.length === 0 ? (
-                        <div className="text-center text-muted-foreground text-sm py-10">No saved maps</div>
-                    ) : (
-                        savedMaps.map(item => (
-                            <div key={item.id} className="group relative bg-white dark:bg-neutral-900 border border-border/50 rounded-xl p-3 hover:shadow-md transition-all cursor-pointer" onClick={() => onLoadMap(item.id)}>
-                                <div className="flex justify-between items-start mb-1">
-                                    <h3 className="font-medium text-sm line-clamp-2 pr-6">{item.title || 'Untitled Map'}</h3>
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); onDeleteMap(item.id); }}
-                                        className="opacity-0 group-hover:opacity-100 p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-all absolute top-2 right-2"
-                                    >
-                                        <Trash2 size={14} />
-                                    </button>
-                                </div>
-                                <span className="text-xs text-muted-foreground">{new Date(item.date).toLocaleString()}</span>
-                            </div>
-                        ))
-                    )
-                )}
+
 
                 {activeTab === 'chats' && (
-                    savedChats?.length === 0 ? (
+                    !savedChats || savedChats.length === 0 ? (
                         <div className="text-center text-muted-foreground text-sm py-10">No saved chats</div>
                     ) : (
-                        savedChats?.map(item => (
-                            <div key={item.id} className="group relative bg-white dark:bg-neutral-900 border border-border/50 rounded-xl p-3 hover:shadow-md transition-all cursor-pointer" onClick={() => onLoadChats && onLoadChats(item.id)}>
-                                <div className="flex justify-between items-start mb-1">
-                                    <h3 className="font-medium text-sm line-clamp-2 pr-6">{item.title || 'Chat History'}</h3>
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); onDeleteChats && onDeleteChats(item.id); }}
-                                        className="opacity-0 group-hover:opacity-100 p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-all absolute top-2 right-2"
-                                    >
-                                        <Trash2 size={14} />
-                                    </button>
-                                </div>
-                                <span className="text-xs text-muted-foreground">{new Date(item.date).toLocaleString()}</span>
-                            </div>
-                        ))
+                        savedChats.map(item => renderItem(item, 'chat', onLoadChats!, onDeleteChats!))
                     )
                 )}
+
+
             </div>
         </div>
     );

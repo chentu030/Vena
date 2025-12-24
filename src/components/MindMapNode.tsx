@@ -62,9 +62,18 @@ export default function MindMapNode({ data, selected, id }: NodeProps<CustomNode
         }
     };
 
+    // Exit edit mode when deselected (clicked outside)
+    useEffect(() => {
+        if (!selected && data.isEditing) {
+            if (data.onLabelChange && typeof data.onLabelChange === 'function') {
+                data.onLabelChange(id, value);
+            }
+        }
+    }, [selected]);
+
     return (
         <div className={`px-4 py-2 shadow-md rounded-md bg-white border-2 transition-all min-w-[150px] text-center
-      ${selected ? 'border-blue-500 shadow-lg' : 'border-neutral-300 dark:border-neutral-600'}
+      ${selected ? 'selected-node border-blue-500 shadow-lg' : 'border-neutral-300 dark:border-neutral-600'}
 `}
             style={{
                 backgroundColor: data.color || '#ffffff',

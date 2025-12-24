@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import EditableMindMap from './EditableMindMap';
 import ChatInterface, { Message } from './ChatInterface';
 import { ArrowLeft, MessageSquare, Map as MapIcon } from 'lucide-react';
-import { Node, Edge, useNodesState, useEdgesState, addEdge, Connection } from '@xyflow/react';
+import { Node, Edge, useNodesState, useEdgesState, addEdge, Connection, ReactFlowProvider } from '@xyflow/react';
 import { v4 as uuidv4 } from 'uuid';
 
 interface SystemMapPanelProps {
@@ -10,13 +10,15 @@ interface SystemMapPanelProps {
     onSave?: (data: { nodes: Node[], edges: Edge[] }) => void;
     initialNodeChats?: NodeChatHistory | null;
     onSaveChats?: (chats: NodeChatHistory) => void;
+    availableGroups?: any[]; // Research Groups
+    mapKey?: string; // Optional key to force reload (e.g. when switching maps or regenerating)
 }
 
 interface NodeChatHistory {
     [nodeId: string]: Message[];
 }
 
-const SystemMapPanel: React.FC<SystemMapPanelProps> = ({ mindMapData, onSave, initialNodeChats, onSaveChats }) => {
+const SystemMapPanel: React.FC<SystemMapPanelProps> = ({ mindMapData, onSave, initialNodeChats, onSaveChats, availableGroups = [], mapKey }) => {
     const [view, setView] = useState<'map' | 'chat'>('map');
     const [activeNode, setActiveNode] = useState<{ id: string; label: string } | null>(null);
     const [nodeChats, setNodeChats] = useState<NodeChatHistory>({});
@@ -60,55 +62,98 @@ const SystemMapPanel: React.FC<SystemMapPanelProps> = ({ mindMapData, onSave, in
     );
 
     // Define onLabelChange callback for MindMapNode - MUST be defined BEFORE use in useEffect
-    const onLabelChange = useCallback((id: string, newLabel: string) => {
+    const onLabelChange = useCallback((id: string, newLabel: string, keepEditing: boolean = false) => {
         setNodes((nds) => nds.map((n) => {
             if (n.id === id) {
                 return {
                     ...n,
-                    data: { ...n.data, label: newLabel, isEditing: false }
+                    data: { ...n.data, label: newLabel, isEditing: keepEditing }
                 };
             }
             return n;
         }));
     }, [setNodes]);
 
-    // Init from props or local storage
+    // Init from props
     // IMPORTANT: Inject the onLabelChange callback into all loaded nodes
-    useEffect(() => {
-        const injectCallbacks = (loadedNodes: Node[]): Node[] => {
-            return loadedNodes.map(node => ({
-                ...node,
-                data: { ...node.data, onLabelChange }
-            }));
-        };
+    // User Rule: Only load from props once (initial load), then local state takes over.
+    // We strictly avoid overwriting local changes with "saved" data from parent to preventing state thrashing.
+    const [loadedMapKey, setLoadedMapKey] = useState<string | null>(null);
 
-        const savedMap = localStorage.getItem('mind_map_data');
-        if (savedMap) {
-            try {
-                const parsed = JSON.parse(savedMap);
-                setNodes(injectCallbacks(parsed.nodes || []));
-                setEdges(parsed.edges || []);
-            } catch (e) { }
-        } else if (mindMapData) {
-            setNodes(injectCallbacks(mindMapData.nodes));
-            setEdges(mindMapData.edges);
+    useEffect(() => {
+        // Load if data exists AND (we haven't loaded anything yet OR the key has changed)
+        const shouldLoad = mindMapData && (!loadedMapKey || (mapKey && mapKey !== loadedMapKey));
+
+        if (shouldLoad) {
+            const injectCallbacks = (loadedNodes: Node[]): Node[] => {
+                return loadedNodes.map(node => {
+                    const baseData = { ...node.data, onLabelChange };
+                    // For Reference nodes, also inject availableGroups
+                    if (node.type === 'reference') {
+                        return {
+                            ...node,
+                            data: { ...baseData, availableGroups }
+                        };
+                    }
+                    return {
+                        ...node,
+                        data: baseData
+                    };
+                });
+            };
+
+            setNodes(injectCallbacks(mindMapData!.nodes));
+            setEdges(mindMapData!.edges);
+            setLoadedMapKey(mapKey || 'loaded');
         }
-    }, [mindMapData, setNodes, setEdges, onLabelChange]);
+    }, [mindMapData, mapKey, loadedMapKey, setNodes, setEdges, onLabelChange, availableGroups]);
+
+    // Reset loaded state if we explicitly clear
+    useEffect(() => {
+        if (!mindMapData) {
+            setLoadedMapKey(null);
+        }
+    }, [mindMapData]);
+
+    // Sync availableGroups to Reference nodes when groups load after the map
+    // This handles the case where groups load asynchronously from Firebase
+    useEffect(() => {
+        if (!availableGroups || availableGroups.length === 0) return;
+
+        setNodes((nds) => {
+            // Check if any reference node needs groups
+            const needsUpdate = nds.some(n =>
+                n.type === 'reference' &&
+                (!n.data.availableGroups || (n.data.availableGroups as any[]).length === 0)
+            );
+
+            if (!needsUpdate) return nds;
+
+            return nds.map(node => {
+                if (node.type === 'reference') {
+                    return {
+                        ...node,
+                        data: { ...node.data, availableGroups, onLabelChange }
+                    };
+                }
+                return node;
+            });
+        });
+    }, [availableGroups, setNodes, onLabelChange]);
 
 
 
     // Persistence Effect - Save whenever nodes/edges change
     useEffect(() => {
-        if (nodes.length > 0 || edges.length > 0) {
-            localStorage.setItem('mind_map_data', JSON.stringify({ nodes, edges }));
+        // Allow saving even if empty (to support clearing the map)
+        // localStorage.setItem('mind_map_data', JSON.stringify({ nodes, edges })); // Optional: Remove local storage if we rely on Firebase
 
-            // Auto-save debounce
-            const timer = setTimeout(() => {
-                if (onSave) onSave({ nodes, edges });
-            }, 2000); // 2 seconds debounce
+        // Auto-save debounce
+        const timer = setTimeout(() => {
+            if (onSave) onSave({ nodes, edges });
+        }, 2000); // 2 seconds debounce
 
-            return () => clearTimeout(timer);
-        }
+        return () => clearTimeout(timer);
     }, [nodes, edges, onSave]);
 
 
@@ -350,27 +395,23 @@ RULES:
                         </h2>
                         <span className="text-xs text-muted-foreground">Edit & Organize</span>
                     </div>
-                    {onSave && (
-                        <button
-                            onClick={() => onSave({ nodes, edges })}
-                            className="px-3 py-1.5 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded-md text-sm font-medium transition-colors flex items-center gap-2"
-                        >
-                            <MapIcon size={14} /> Save Map
-                        </button>
-                    )}
+
                 </div>
                 <div className="flex-1 overflow-hidden relative bg-neutral-100 dark:bg-neutral-900/50">
-                    <EditableMindMap
-                        nodes={nodes}
-                        edges={edges}
-                        onNodesChange={onNodesChange}
-                        onEdgesChange={onEdgesChange}
-                        onConnect={onConnect}
-                        onNodeClick={handleNodeClick}
-                        onNodeDoubleClick={handleNodeDoubleClick}
-                        setNodes={setNodes}
-                        setEdges={setEdges}
-                    />
+                    <ReactFlowProvider>
+                        <EditableMindMap
+                            nodes={nodes}
+                            edges={edges}
+                            onNodesChange={onNodesChange}
+                            onEdgesChange={onEdgesChange}
+                            onConnect={onConnect}
+                            onNodeClick={handleNodeClick}
+                            onNodeDoubleClick={handleNodeDoubleClick}
+                            setNodes={setNodes}
+                            setEdges={setEdges}
+                            availableGroups={availableGroups}
+                        />
+                    </ReactFlowProvider>
                 </div>
             </div>
         );
