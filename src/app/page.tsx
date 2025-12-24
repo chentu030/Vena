@@ -1605,7 +1605,7 @@ Do NOT include any explanation or markdown.`
                         <div className="w-8 h-8 bg-foreground rounded-full flex items-center justify-center text-background shadow-sm">
                             <Command size={14} />
                         </div>
-                        <span className={`font-medium tracking-tight mr-4 ${sidebarView !== 'none' ? 'hidden' : 'hidden md:block'}`}>Vena</span>
+                        <span className={`font-medium tracking-tight mr-4 ${sidebarView !== 'none' ? 'hidden' : 'hidden md:block'}`}>Venalium</span>
 
                         {/* User Profile - Client Side Only to prevent hydration mismatch */}
                         {mounted && user && (
