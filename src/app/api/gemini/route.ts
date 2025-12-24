@@ -18,7 +18,7 @@ export async function POST(request: Request) {
 
     try {
         const body = await request.json();
-        const { model = 'gemini-1.5-flash', prompt, history, task } = body;
+        const { model = 'gemini-2.5-flash', prompt, history, task } = body;
 
         if (!prompt) {
             return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
