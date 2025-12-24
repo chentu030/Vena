@@ -292,7 +292,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, onSendMessage, 
                                 ) : (
                                     <div className="prose prose-sm dark:prose-invert max-w-none font-light">
                                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                            {msg.content}
+                                            {msg.content || ''}
                                         </ReactMarkdown>
                                     </div>
                                 )}

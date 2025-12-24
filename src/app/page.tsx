@@ -1115,7 +1115,9 @@ Do NOT include any explanation or markdown.`
     useEffect(() => {
         if (!user || messages.length === 0) return;
         const timer = setTimeout(() => {
-            saveProjectData(user.uid, 'currentChat', { messages });
+            // Sanitize messages to remove undefined values which Firestore hates
+            const cleanMessages = JSON.parse(JSON.stringify(messages));
+            saveProjectData(user.uid, 'currentChat', { messages: cleanMessages });
         }, 1000);
         return () => clearTimeout(timer);
     }, [messages, user]);
