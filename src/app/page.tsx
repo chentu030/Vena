@@ -1678,7 +1678,7 @@ Do NOT include any explanation or markdown.`
                                 <span className="italic text-muted-foreground">research today?</span>
                             </h1>
                             <p className="text-lg text-muted-foreground font-light max-w-lg">
-                                Powered by Gemini 2.0 & Scopus. Ask anything about academic papers.
+                                Powered by Gemini 3.0 & Scopus. Ask anything about academic papers.
                             </p>
                         </div>
                     )}
