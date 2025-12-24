@@ -12,6 +12,9 @@
   --border: #e5e5e5;
   --accent: #fafafa;
   --accent-foreground: #171717;
+  --white: #ffffff;
+  --black: #000000;
+  --transparent: transparent;
 }
 
 [data-theme='dark'] {

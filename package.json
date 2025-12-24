@@ -21,6 +21,7 @@
     "dagre": "^0.8.5",
     "file-saver": "^2.0.5",
     "firebase": "^12.7.0",
+    "framer-motion": "^12.23.26",
     "html-to-image": "^1.11.13",
     "html2canvas": "^1.4.1",
     "jspdf": "^3.0.4",
@@ -35,6 +36,7 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
+    "tailwind-merge": "^3.4.0",
     "tiptap-markdown": "^0.9.0",
     "uuid": "^13.0.0"
   },
