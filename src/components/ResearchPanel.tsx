@@ -246,7 +246,8 @@ export default function ResearchPanel({ onClose, initialResults, onSave, groups 
             if (!res.ok) throw new Error(res.statusText);
 
             const data = await res.json();
-            const jsonStr = data.text.replace(/```json/g, '').replace(/```/g, '').trim();
+            if (!data.text) throw new Error(data.details || "No text returned from Gemini");
+            const jsonStr = (data.text || '{}').replace(/```json/g, '').replace(/```/g, '').trim();
             const parsed = JSON.parse(jsonStr);
 
             return (parsed.articles || []).map((e: any, i: number) => ({

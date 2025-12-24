@@ -253,7 +253,9 @@ export default function Home() {
                         if (!res.ok) throw new Error("Gemini API failed");
 
                         const data = await res.json();
-                        let articleContent = data.text;
+                        let articleContent = data.text || '';
+
+                        if (!articleContent && data.error) throw new Error(data.details || data.error);
 
                         // Process citations: Convert [ID:X] to <citation> tags
                         articleContent = articleContent.replace(/\[ID:(\d+)\]/g, (match: string, idStr: string) => {
@@ -362,7 +364,8 @@ export default function Home() {
                         })
                     });
                     const data1 = await res1.json();
-                    const jsonStr = data1.text.replace(/```json/g, '').replace(/```/g, '').trim();
+                    if (!data1.text) throw new Error(data1.details || "No text returned from Gemini");
+                    const jsonStr = (data1.text || '{}').replace(/```json/g, '').replace(/```/g, '').trim();
                     hierarchyRoot = JSON.parse(jsonStr);
 
                     // Fallback if root is missing or wrong format
@@ -828,7 +831,8 @@ export default function Home() {
                             body: JSON.stringify({ model: 'gemini-3-pro-preview', prompt: prompt, history: [] })
                         });
                         const data = await res.json();
-                        const jsonStr = data.text.replace(/```json/g, '').replace(/```/g, '').trim();
+                        if (!data.text) throw new Error(data.details || "No text returned from Gemini");
+                        const jsonStr = (data.text || '{}').replace(/```json/g, '').replace(/```/g, '').trim();
                         const parsed = JSON.parse(jsonStr);
                         return (parsed.articles || []).map((e: any, i: number) => ({
                             id: `gen-gemini-${i}-${Date.now()}`,
