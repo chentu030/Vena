@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Try server-side env first, then fallback to NEXT_PUBLIC_ variant
-const API_KEY = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
+const API_KEY = process.env.GEMINI_API_KEY || '';
 
 export async function POST(request: Request) {
     // Validate API key is present
@@ -18,13 +18,19 @@ export async function POST(request: Request) {
 
     try {
         const body = await request.json();
-        const { model = 'gemini-2.5-flash', prompt, history, task } = body;
+        const { model = 'gemini-2.5-flash', prompt, history, task, useGrounding = false } = body;
 
         if (!prompt) {
             return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
         }
 
-        const generativeModel = genAI.getGenerativeModel({ model });
+        // Configure tools if useGrounding is requested
+        const tools: any = useGrounding ? [{ googleSearch: {} }] : [];
+
+        const generativeModel = genAI.getGenerativeModel({
+            model,
+            tools: tools
+        });
 
         if (task === 'chat') {
             const chat = generativeModel.startChat({

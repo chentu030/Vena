@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, FileText, ExternalLink, Loader2, Table, Download, Play, BookOpen, Calendar, Save, Trash2, FolderPlus, ChevronDown, Upload } from 'lucide-react';
+import { Search, FileText, ExternalLink, Loader2, Table, Download, Play, BookOpen, Calendar, Save, Trash2, FolderPlus, ChevronDown, Upload, Edit2, X } from 'lucide-react';
 
 interface ResearchGroup {
     id: string;
@@ -16,6 +16,8 @@ interface ResearchPanelProps {
     currentGroupId?: string | null;
     onGroupChange?: (groupId: string) => void;
     onCreateGroup?: (name: string) => void;
+    onRenameGroup?: (groupId: string, newName: string) => void;
+    onDeleteGroup?: (groupId: string) => void;
     onAutoSave?: (papers: ResearchArticle[]) => void;
 }
 
@@ -35,7 +37,7 @@ interface ResearchArticle {
     sourceModel?: string; // 'scopus' | 'gemini-2.0-flash' | 'gemini-3-pro-preview' etc.
 }
 
-export default function ResearchPanel({ onClose, initialResults, onSave, groups = [], currentGroupId, onGroupChange, onCreateGroup, onAutoSave }: ResearchPanelProps) {
+export default function ResearchPanel({ onClose, initialResults, onSave, groups = [], currentGroupId, onGroupChange, onCreateGroup, onRenameGroup, onDeleteGroup, onAutoSave }: ResearchPanelProps) {
     const [query, setQuery] = useState('');
     const [results, setResults] = useState<ResearchArticle[]>(initialResults || []);
     const [isLoading, setIsLoading] = useState(false);
@@ -44,6 +46,17 @@ export default function ResearchPanel({ onClose, initialResults, onSave, groups 
     const [showGroupDropdown, setShowGroupDropdown] = useState(false);
     const [newGroupName, setNewGroupName] = useState('');
     const [showNewGroupInput, setShowNewGroupInput] = useState(false);
+
+    // Rename State
+    const [isRenaming, setIsRenaming] = useState(false);
+    const [renameValue, setRenameValue] = useState('');
+
+    const handleSubmitRename = () => {
+        if (currentGroupId && renameValue.trim()) {
+            onRenameGroup?.(currentGroupId, renameValue.trim());
+            setIsRenaming(false);
+        }
+    };
 
     // Year Filter State (Default: Recent 3 years)
     const currentYear = new Date().getFullYear();
@@ -239,7 +252,8 @@ export default function ResearchPanel({ onClose, initialResults, onSave, groups 
                 body: JSON.stringify({
                     model: 'gemini-3-pro-preview',
                     prompt: prompt,
-                    history: []
+                    history: [],
+                    useGrounding: true
                 })
             });
 
@@ -431,11 +445,8 @@ Output only the keywords:`
                 }`;
 
                 // Select analysis model based on source
-                // - Gemini 3.0 Pro papers -> use Gemini 3.0 Flash
-                // - Scopus/other papers -> use Gemini 2.0 Flash
-                const analysisModel = article.sourceModel === 'gemini-3-pro-preview'
-                    ? 'gemini-3-flash-preview'
-                    : 'gemini-2.0-flash';
+                // - Force Gemini 3.0 Flash for efficiency with Grounding as requested
+                const analysisModel = 'gemini-3-flash-preview';
 
                 const res = await fetch('/api/gemini', {
                     method: 'POST',
@@ -443,7 +454,8 @@ Output only the keywords:`
                         model: analysisModel,
                         task: 'summary',
                         prompt: prompt,
-                        history: []
+                        history: [],
+                        useGrounding: true
                     })
                 });
 
@@ -541,11 +553,14 @@ Output only the keywords:`
                 </div>
             </div>
 
-            {/* Group Selector */}
-            {groups.length > 0 && (
-                <div className="px-6 py-3 border-b border-border/40 bg-muted/10">
-                    <div className="flex items-center gap-3">
-                        <span className="text-xs text-muted-foreground">Group:</span>
+            {/* Group Selector - Always Visible */}
+            <div className="px-6 py-3 border-b border-border/40 bg-muted/10">
+                <div className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground">Group:</span>
+
+                    {groups.length === 0 ? (
+                        <div className="text-sm text-neutral-500 italic">No groups created</div>
+                    ) : (
                         <div className="relative">
                             <button
                                 onClick={() => setShowGroupDropdown(!showGroupDropdown)}
@@ -572,55 +587,110 @@ Output only the keywords:`
                                 </div>
                             )}
                         </div>
-                        <button
-                            onClick={() => setShowNewGroupInput(true)}
-                            className="flex items-center gap-1 px-2 py-1.5 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
-                        >
-                            <FolderPlus size={14} /> New Group
-                        </button>
-                    </div>
-                    {showNewGroupInput && (
-                        <div className="mt-3 flex gap-2">
-                            <input
-                                type="text"
-                                value={newGroupName}
-                                onChange={(e) => setNewGroupName(e.target.value)}
-                                placeholder="Enter group name..."
-                                className="flex-1 px-3 py-1.5 bg-white dark:bg-neutral-800 border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                                autoFocus
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && newGroupName.trim()) {
-                                        onCreateGroup?.(newGroupName.trim());
-                                        setNewGroupName('');
-                                        setShowNewGroupInput(false);
-                                    } else if (e.key === 'Escape') {
-                                        setShowNewGroupInput(false);
-                                        setNewGroupName('');
-                                    }
-                                }}
-                            />
-                            <button
-                                onClick={() => {
-                                    if (newGroupName.trim()) {
-                                        onCreateGroup?.(newGroupName.trim());
-                                        setNewGroupName('');
-                                        setShowNewGroupInput(false);
-                                    }
-                                }}
-                                className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors"
-                            >
-                                Create
-                            </button>
-                            <button
-                                onClick={() => { setShowNewGroupInput(false); setNewGroupName(''); }}
-                                className="px-3 py-1.5 bg-neutral-200 dark:bg-neutral-700 rounded-lg text-sm hover:bg-neutral-300 dark:hover:bg-neutral-600 transition-colors"
-                            >
-                                Cancel
-                            </button>
+                    )}
+
+                    {/* Group Actions */}
+                    {currentGroupId && groups.find(g => g.id === currentGroupId) && (
+                        <div className="flex items-center gap-1">
+                            {isRenaming ? (
+                                <div className="flex items-center gap-1">
+                                    <input
+                                        type="text"
+                                        value={renameValue}
+                                        onChange={(e) => setRenameValue(e.target.value)}
+                                        className="w-32 px-2 py-1 text-xs border rounded bg-white dark:bg-neutral-800"
+                                        autoFocus
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') handleSubmitRename();
+                                            if (e.key === 'Escape') setIsRenaming(false);
+                                        }}
+                                    />
+                                    <button onClick={handleSubmitRename} className="p-1 hover:bg-green-100 text-green-600 rounded"><Save size={14} /></button>
+                                    <button onClick={() => setIsRenaming(false)} className="p-1 hover:bg-red-100 text-red-600 rounded"><X size={14} /></button>
+                                </div>
+                            ) : (
+                                <>
+                                    <button
+                                        onClick={() => {
+                                            if (currentGroupId) {
+                                                const g = groups.find(g => g.id === currentGroupId);
+                                                if (g) {
+                                                    setRenameValue(g.name);
+                                                    setIsRenaming(true);
+                                                }
+                                            }
+                                        }}
+                                        className="p-1.5 text-neutral-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                        title="Rename Group"
+                                    >
+                                        <Edit2 size={14} />
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            if (currentGroupId && confirm('Are you sure you want to delete this group?')) {
+                                                onDeleteGroup?.(currentGroupId);
+                                            }
+                                        }}
+                                        className="p-1.5 text-neutral-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                        title="Delete Group"
+                                    >
+                                        <Trash2 size={14} />
+                                    </button>
+                                </>
+                            )}
                         </div>
                     )}
+
+                    <div className="h-4 w-px bg-border/50 mx-1" />
+
+                    <button
+                        onClick={() => setShowNewGroupInput(true)}
+                        className="flex items-center gap-1 px-2 py-1.5 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
+                    >
+                        <FolderPlus size={14} /> New Group
+                    </button>
                 </div>
-            )}
+                {showNewGroupInput && (
+                    <div className="mt-3 flex gap-2">
+                        <input
+                            type="text"
+                            value={newGroupName}
+                            onChange={(e) => setNewGroupName(e.target.value)}
+                            placeholder="Enter group name..."
+                            className="flex-1 px-3 py-1.5 bg-white dark:bg-neutral-800 border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            autoFocus
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && newGroupName.trim()) {
+                                    onCreateGroup?.(newGroupName.trim());
+                                    setNewGroupName('');
+                                    setShowNewGroupInput(false);
+                                } else if (e.key === 'Escape') {
+                                    setShowNewGroupInput(false);
+                                    setNewGroupName('');
+                                }
+                            }}
+                        />
+                        <button
+                            onClick={() => {
+                                if (newGroupName.trim()) {
+                                    onCreateGroup?.(newGroupName.trim());
+                                    setNewGroupName('');
+                                    setShowNewGroupInput(false);
+                                }
+                            }}
+                            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors"
+                        >
+                            Create
+                        </button>
+                        <button
+                            onClick={() => { setShowNewGroupInput(false); setNewGroupName(''); }}
+                            className="px-3 py-1.5 bg-neutral-200 dark:bg-neutral-700 rounded-lg text-sm hover:bg-neutral-300 dark:hover:bg-neutral-600 transition-colors"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                )}
+            </div>
 
             {/* Controls */}
             <div className="p-6 border-b border-border/40 space-y-4">

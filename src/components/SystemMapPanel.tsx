@@ -24,35 +24,39 @@ const SystemMapPanel: React.FC<SystemMapPanelProps> = ({ mindMapData, onSave, in
     const [nodeChats, setNodeChats] = useState<NodeChatHistory>({});
     const [isLoading, setIsLoading] = useState(false);
 
-    // Load Initial Chats from Prop (History Sidebar) or LocalStorage
-    useEffect(() => {
-        if (initialNodeChats) {
-            setNodeChats(initialNodeChats);
-        } else {
-            const saved = localStorage.getItem('node_chats');
-            if (saved) {
-                try {
-                    setNodeChats(JSON.parse(saved));
-                } catch (e) { console.error("Failed to load node chats", e); }
-            }
-        }
-    }, [initialNodeChats]);
+    // === ROBUST AUTO-SAVE (Handle Debounce + Unmount) ===
 
-    // Save Chats (Local + Auto-Save to History)
+    // 1. CHATS
+    const nodeChatsRef = React.useRef(nodeChats);
+    const onSaveChatsRef = React.useRef(onSaveChats);
+    const chatsDirtyRef = React.useRef(false);
+
+    useEffect(() => {
+        nodeChatsRef.current = nodeChats;
+        if (Object.keys(nodeChats).length > 0) chatsDirtyRef.current = true;
+    }, [nodeChats]);
+
+    useEffect(() => { onSaveChatsRef.current = onSaveChats; }, [onSaveChats]);
+
     useEffect(() => {
         if (Object.keys(nodeChats).length > 0) {
             localStorage.setItem('node_chats', JSON.stringify(nodeChats));
-
-            // Auto-save debounce for HistorySidebar
             const timer = setTimeout(() => {
-                if (onSaveChats) onSaveChats(nodeChats);
-            }, 3000); // 3 seconds debounce for chats
-
+                if (onSaveChats && chatsDirtyRef.current) {
+                    onSaveChats(nodeChats);
+                    chatsDirtyRef.current = false;
+                }
+            }, 3000);
             return () => clearTimeout(timer);
         }
     }, [nodeChats, onSaveChats]);
 
-    // React Flow State (Local persistence)
+    // 2. MAP (Nodes/Edges)
+    // Assuming nodes and edges are defined here or above this block
+    // For this snippet, we'll assume they are in scope.
+    // In a full React component, these would typically be:
+    // const [nodes, setNodes, onNodesChange] = useNodesState(mindMapData?.nodes || []);
+    // const [edges, setEdges, onEdgesChange] = useEdgesState(mindMapData?.edges || []);
     const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
@@ -74,17 +78,20 @@ const SystemMapPanel: React.FC<SystemMapPanelProps> = ({ mindMapData, onSave, in
         }));
     }, [setNodes]);
 
-    // Init from props
-    // IMPORTANT: Inject the onLabelChange callback into all loaded nodes
-    // User Rule: Only load from props once (initial load), then local state takes over.
-    // We strictly avoid overwriting local changes with "saved" data from parent to preventing state thrashing.
+    const mapDataRef = React.useRef({ nodes, edges });
+    const onSaveMapRef = React.useRef(onSave);
+    const mapDirtyRef = React.useRef(false);
+
+    // Track if we've already loaded this map to prevent state thrashing
     const [loadedMapKey, setLoadedMapKey] = useState<string | null>(null);
 
+    // CRITICAL: Load data from mindMapData prop into local state
     useEffect(() => {
         // Load if data exists AND (we haven't loaded anything yet OR the key has changed)
         const shouldLoad = mindMapData && (!loadedMapKey || (mapKey && mapKey !== loadedMapKey));
 
         if (shouldLoad) {
+            console.log("Loading mindMapData into state:", mindMapData.nodes.length, "nodes");
             const injectCallbacks = (loadedNodes: Node[]): Node[] => {
                 return loadedNodes.map(node => {
                     const baseData = { ...node.data, onLabelChange };
@@ -102,8 +109,8 @@ const SystemMapPanel: React.FC<SystemMapPanelProps> = ({ mindMapData, onSave, in
                 });
             };
 
-            setNodes(injectCallbacks(mindMapData!.nodes));
-            setEdges(mindMapData!.edges);
+            setNodes(injectCallbacks(mindMapData.nodes));
+            setEdges(mindMapData.edges);
             setLoadedMapKey(mapKey || 'loaded');
         }
     }, [mindMapData, mapKey, loadedMapKey, setNodes, setEdges, onLabelChange, availableGroups]);
@@ -115,46 +122,54 @@ const SystemMapPanel: React.FC<SystemMapPanelProps> = ({ mindMapData, onSave, in
         }
     }, [mindMapData]);
 
-    // Sync availableGroups to Reference nodes when groups load after the map
-    // This handles the case where groups load asynchronously from Firebase
     useEffect(() => {
-        if (!availableGroups || availableGroups.length === 0) return;
+        mapDataRef.current = { nodes, edges };
+        mapDirtyRef.current = true;
+    }, [nodes, edges]);
 
-        setNodes((nds) => {
-            // Check if any reference node needs groups
-            const needsUpdate = nds.some(n =>
-                n.type === 'reference' &&
-                (!n.data.availableGroups || (n.data.availableGroups as any[]).length === 0)
-            );
-
-            if (!needsUpdate) return nds;
-
-            return nds.map(node => {
-                if (node.type === 'reference') {
-                    return {
-                        ...node,
-                        data: { ...node.data, availableGroups, onLabelChange }
-                    };
-                }
-                return node;
-            });
-        });
-    }, [availableGroups, setNodes, onLabelChange]);
-
-
+    useEffect(() => { onSaveMapRef.current = onSave; }, [onSave]);
 
     // Persistence Effect - Save whenever nodes/edges change
     useEffect(() => {
-        // Allow saving even if empty (to support clearing the map)
-        // localStorage.setItem('mind_map_data', JSON.stringify({ nodes, edges })); // Optional: Remove local storage if we rely on Firebase
-
-        // Auto-save debounce
+        // Debounce Save
         const timer = setTimeout(() => {
-            if (onSave) onSave({ nodes, edges });
-        }, 2000); // 2 seconds debounce
+            if (onSave && mapDirtyRef.current) {
+                onSave({ nodes, edges });
+                mapDirtyRef.current = false;
+            }
+        }, 1000);
 
         return () => clearTimeout(timer);
     }, [nodes, edges, onSave]);
+
+    // 3. UNMOUNT HANDLER (Force Save)
+    useEffect(() => {
+        return () => {
+            // Force Save Chats
+            if (chatsDirtyRef.current && onSaveChatsRef.current) {
+                onSaveChatsRef.current(nodeChatsRef.current);
+            }
+            // Force Save Map
+            if (mapDirtyRef.current && onSaveMapRef.current) {
+                onSaveMapRef.current(mapDataRef.current);
+            }
+        };
+    }, []);
+    // Load Initial Chats from Prop (History Sidebar) or LocalStorage
+    useEffect(() => {
+        if (initialNodeChats) {
+            setNodeChats(initialNodeChats);
+        } else {
+            const saved = localStorage.getItem('node_chats');
+            if (saved) {
+                try {
+                    setNodeChats(JSON.parse(saved));
+                } catch (e) { console.error("Failed to load node chats", e); }
+            }
+        }
+    }, [initialNodeChats]);
+
+
 
 
     const handleNodeClick = (id: string, label: string) => {

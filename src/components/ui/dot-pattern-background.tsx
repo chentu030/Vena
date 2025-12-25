@@ -18,13 +18,14 @@ export const DotPatternBackground = ({
                 className
             )}
             {...props}
+            suppressHydrationWarning
         >
             {/* Base Layer: Soft Color Orbs - z-0 */}
-            <div className="absolute inset-0 z-0 pointer-events-none">
+            <div className="absolute inset-0 z-0 pointer-events-none" suppressHydrationWarning>
                 {/* Blue Orb (Left) - Larger and deeper */}
-                <div className="absolute top-[-10%] left-[-15%] w-[800px] h-[800px] bg-blue-500/15 dark:bg-blue-600/20 rounded-full blur-[120px]" />
+                <div className="absolute top-[-10%] left-[-15%] w-[800px] h-[800px] bg-blue-500/15 dark:bg-blue-600/20 rounded-full blur-[120px]" suppressHydrationWarning />
                 {/* Green Orb (Right) - Larger and deeper */}
-                <div className="absolute bottom-[-10%] right-[-15%] w-[800px] h-[800px] bg-emerald-500/15 dark:bg-emerald-600/20 rounded-full blur-[120px]" />
+                <div className="absolute bottom-[-10%] right-[-15%] w-[800px] h-[800px] bg-emerald-500/15 dark:bg-emerald-600/20 rounded-full blur-[120px]" suppressHydrationWarning />
             </div>
 
             {/* Dot Pattern Layer - z-[1] (Static position but pulsing) */}
