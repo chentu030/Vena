@@ -10,9 +10,9 @@ export const metadata: Metadata = {
   title: 'Venalium',
   description: 'AI-powered Research Assistant',
   icons: {
-    icon: '/venalium-icon.png?v=2',
-    apple: '/venalium-icon.png?v=2',
-    shortcut: '/venalium-icon.png?v=2',
+    icon: '/icon.ico?v=3',
+    shortcut: '/icon.ico?v=3',
+    apple: '/venalium-icon.png?v=3',
   },
 };
 
