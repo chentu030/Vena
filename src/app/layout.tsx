@@ -9,6 +9,11 @@ const playfair = Playfair_Display({ subsets: ['latin'], variable: '--font-playfa
 export const metadata: Metadata = {
   title: 'Venalium',
   description: 'AI-powered Research Assistant',
+  icons: {
+    icon: '/venalium-icon.png?v=2',
+    apple: '/venalium-icon.png?v=2',
+    shortcut: '/venalium-icon.png?v=2',
+  },
 };
 
 import { AuthProvider } from '@/lib/auth';
