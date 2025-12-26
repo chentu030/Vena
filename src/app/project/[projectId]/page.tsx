@@ -19,6 +19,15 @@ import { Loader2, Moon, Sun, SidebarClose, SidebarOpen, Command, FileText, Map a
 import { saveDocument, loadCollection, deleteDocument, CollectionName, saveProjectData, loadProjectData, getProjectDetails, ProjectData } from '@/lib/firestore';
 import { getIconComponent, getColorClasses } from '@/lib/project-utils';
 
+interface SearchConfig {
+    keywords: string;
+    scopusCount: number;
+    geminiCount: number;
+    queries?: string[];
+    originalMessage: string;
+    dateRange?: { start: number; end: number };
+}
+
 export default function ProjectWorkspace() {
     const { user, loading, signOut } = useAuth();
     const router = useRouter();
@@ -50,6 +59,7 @@ export default function ProjectWorkspace() {
     // Core State
     const [messages, setMessages] = useState<Message[]>([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [loadingStatus, setLoadingStatus] = useState<string>('');
 
     // History / Saved Items
     const [savedDrafts, setSavedDrafts] = useState<any[]>([]);
@@ -66,6 +76,9 @@ export default function ProjectWorkspace() {
     const [currentResearchId, setCurrentResearchId] = useState<string | null>(null);
     const [currentResearchResults, setCurrentResearchResults] = useState<any[]>([]);
 
+    // Intent Detection State
+    const [isCheckingIntent, setIsCheckingIntent] = useState(false);
+
     // Research Groups
     const [researchGroups, setResearchGroups] = useState<any[]>([]);
     const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
@@ -77,6 +90,7 @@ export default function ProjectWorkspace() {
     const [mainContent, setMainContent] = useState('');
     const [activeNodeChats, setActiveNodeChats] = useState<any>(null); // For mind map node chats
     const [historyOpen, setHistoryOpen] = useState(false);
+    const [historyButtonY, setHistoryButtonY] = useState(50); // Position in % from top
 
     // Sidebar State: 'none' | 'draft' | 'map' | 'main' | 'research'
     const [sidebarView, setSidebarView] = useState<'none' | 'draft' | 'map' | 'main' | 'research'>('none');
@@ -84,6 +98,18 @@ export default function ProjectWorkspace() {
     // Resizable sidebar width (percentage)
     const [sidebarWidth, setSidebarWidth] = useState(45);
     const [isResizing, setIsResizing] = useState(false);
+
+    // Abort Controller for stopping generation
+    const abortControllerRef = useRef<AbortController | null>(null);
+
+    const handleStopGeneration = () => {
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+            abortControllerRef.current = null;
+        }
+        setIsLoading(false);
+        setLoadingStatus('');
+    };
 
     useEffect(() => { setMounted(true); }, []);
 
@@ -200,7 +226,222 @@ export default function ProjectWorkspace() {
         const timer = setTimeout(performSave, 10000);
 
         return () => clearTimeout(timer); // Reset timer on typing
+        return () => clearTimeout(timer); // Reset timer on typing
     }, [mainContent, user, currentManuscriptId, savedManuscripts, projectId]);
+
+    // NEW: Extracted Logic for Literature Search Execution
+    const executeLiteratureSearch = async (config: SearchConfig) => {
+        setIsLoading(true);
+
+        setSidebarView('research'); // Switch to research tab
+
+        const newMessages = [...messages, { role: 'system', content: `🔍 Starting literature search for: "${config.keywords}" (${config.scopusCount} Scopus, ${config.geminiCount} Gemini)...` }];
+        setMessages(newMessages);
+
+        // Start Abort Controller
+        if (abortControllerRef.current) abortControllerRef.current.abort();
+        abortControllerRef.current = new AbortController();
+        const signal = abortControllerRef.current.signal;
+
+        // Reference to ResearchPanel to trigger search
+        // Since ResearchPanel manages its own search state, we might need a way to pass this
+        // Ideally, ResearchPanel should expose a ref or we pass "initialQuery" prop but that's for mount
+        // For now, we'll simulate the search logic here OR better:
+        // We set a "triggerSearch" state that ResearchPanel listens to? 
+        // Or we just update the research results directly here if we move the fetch logic up?
+        // Given the existing architecture where ResearchPanel is self-contained, 
+        // we might re-use the Logic inside ResearchPanel. 
+        // BUT Refactoring ResearchPanel to accept a "trigger" prop is cleaner.
+
+        // However, to avoid Touching ResearchPanel again deeply, we can do the fetch HERE 
+        // and pass results to ResearchPanel via `activeNodeChats` or a new prop `externalResults`.
+        // WAIT: implementation_plan said "call executeLiteratureSearch... logic that calls Scopus/Gemini".
+        // The original code fetchScopus was INSIDE handleSendMessage.
+        // So I should move that logic HERE.
+
+        try {
+            // Helper: Generate PDF link
+            const generatePdfLink = (title: string, doi: string) => {
+                if (doi) return `https://doi.org/${doi}`;
+                return `https://scholar.google.com/scholar?q=${encodeURIComponent(title)}`;
+            };
+
+            // Fetch from Scopus (with Offset)
+            const fetchScopus = async (searchQuery: string, limit: number, offset: number = 0) => {
+                try {
+                    // Extended Date Range: Up to 2026 to include future publications
+                    const startYear = config.dateRange?.start || 2023;
+                    const endYear = config.dateRange?.end || 2026;
+                    const dateFilter = `PUBYEAR > ${startYear - 1} AND PUBYEAR < ${endYear + 1}`;
+                    const fullQuery = `TITLE-ABS-KEY(${searchQuery}) AND ${dateFilter}`;
+                    const res = await fetch(`/api/scopus?q=${encodeURIComponent(fullQuery)}&count=${limit}&start=${offset}`, { signal });
+                    const data = await res.json();
+
+                    if (data.error) return [];
+
+                    return (data['search-results']?.entry || []).map((entry: any) => ({
+                        id: entry['dc:identifier']?.split(':')[1] || Math.random().toString(),
+                        title: entry['dc:title'],
+                        authors: entry['dc:creator'] || 'Unknown',
+                        source: entry['prism:publicationName'],
+                        year: entry['prism:coverDate'] ? entry['prism:coverDate'].substring(0, 4) : 'N/A',
+                        doi: entry['prism:doi'],
+                        link: generatePdfLink(entry['dc:title'], entry['prism:doi']),
+                        abstract: entry['dc:description'] || 'No abstract available.',
+                        keywords: '',
+                        sourceModel: 'scopus'
+                    }));
+                } catch (e) {
+                    console.error("Scopus fetch failed", e);
+                    return [];
+                }
+            };
+
+            // Fetch from Gemini (Extended Date)
+            const fetchGemini = async (searchQuery: string, limit: number) => {
+                try {
+                    const startYear = config.dateRange?.start || 2023;
+                    const endYear = config.dateRange?.end || 2026;
+                    const prompt = `You are a research assistant. Use Google Search to find ${limit} REAL, EXISTING, and VERIFIED academic papers (${startYear}-${endYear}) about: "${searchQuery}".
+                
+                IMPORTANT:
+                - Use the "googleSearch" tool to verify the existence of each paper.
+                - Do NOT hallucinate papers.
+                - Return JSON ONLY.
+
+                Return JSON: {"articles":[{"authors":"...","title":"...","source":"...","year":"...","abstract":"...","doi":"..."}]}`;
+                    const res = await fetch('/api/gemini', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            model: 'gemini-3-pro-preview',
+                            task: 'summary',
+                            prompt: prompt,
+                            history: [],
+                            useGrounding: true
+                        }),
+                        signal
+                    });
+                    const data = await res.json();
+                    if (!data.text) return [];
+                    let jsonStr = data.text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+                    const jsonMatch = jsonStr.match(/\{[\s\S]*"articles"[\s\S]*\}/);
+                    if (jsonMatch) jsonStr = jsonMatch[0];
+
+                    let parsed;
+                    try {
+                        parsed = JSON.parse(jsonStr);
+                    } catch (e) {
+                        return [];
+                    }
+
+                    return (parsed.articles || []).map((e: any, i: number) => ({
+                        id: `gen-${Date.now()}-${i}`,
+                        authors: e.authors || 'Unknown',
+                        title: e.title,
+                        source: e.source || 'Unknown',
+                        year: e.year || 'N/A',
+                        doi: e.doi || '',
+                        link: generatePdfLink(e.title, e.doi),
+                        abstract: e.abstract || '',
+                        sourceModel: 'gemini-3-pro-preview'
+                    }));
+                } catch (e) {
+                    console.error("Gemini fetch failed", e);
+                    return [];
+                }
+            };
+
+            // Calculate offset based on existing Scopus papers
+            // Ideally we filter by query, but simple count is a decent proxy for "Next Batch"
+            const existingScopusCount = currentResearchResults.filter(r => r.sourceModel === 'scopus').length;
+
+            setLoadingStatus(`🔍 Searching: "${config.keywords}" (${config.scopusCount} Scopus [Offset: ${existingScopusCount}], ${config.geminiCount} Gemini)...`);
+
+            const [scopusResults, geminiResultsBatches] = await Promise.all([
+                fetchScopus(config.keywords, config.scopusCount, existingScopusCount),
+                Promise.all(geminiQueries.map(async (q, i) => {
+                    // Optional: Update status if batched (though parallel makes it fast)
+                    if (geminiQueries.length > 1) setLoadingStatus(`🔍 Running Batch ${i + 1}/${geminiQueries.length}: "${q.substring(0, 20)}..."`);
+                    return fetchGemini(q, 15);
+                }))
+            ]);
+
+            setLoadingStatus("Processing results...");
+            const geminiResults = geminiResultsBatches.flat();
+
+            const newPapers = [...scopusResults, ...geminiResults];
+
+            // Deduplication: Filter out papers already present in current results
+            const existingKeys = new Set(currentResearchResults.map((p: any) => (p.doi || p.title || '').toLowerCase()));
+            const uniquePapers = newPapers.filter(p => !existingKeys.has((p.doi || p.title || '').toLowerCase()));
+
+            const mergedResults = [...currentResearchResults, ...uniquePapers];
+            setCurrentResearchResults(mergedResults);
+
+            const skippedCount = newPapers.length - uniquePapers.length;
+            const statusMsg = uniquePapers.length > 0
+                ? `✅ Analyzed & Found ${uniquePapers.length} NEW papers for "${config.keywords}"`
+                : `⚠️ Search completed but found NO new unique papers (all ${skippedCount} items were duplicates).`;
+
+            const extraMsg = skippedCount > 0 && uniquePapers.length > 0 ? ` (${skippedCount} duplicates skipped)` : '';
+
+            setMessages(prev => [...prev, {
+                role: 'model',
+                content: `${statusMsg}${extraMsg}. Check the Research Panel.`
+            }]);
+
+        } catch (error) {
+            console.error(error);
+            setMessages(prev => [...prev, { role: 'model', content: "❌ Search failed." }]);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    // NEW: Extracted Logic for Normal Chat Response
+    const processChatResponse = async (text: string, fileContext: string = '', newMessages: Message[]) => {
+        const systemContext = `You are Venalium, an advanced academic research assistant.
+            Current Project: ${projectDetails?.name}
+            Description: ${projectDetails?.description}
+            
+            User Query: "${text}"
+            
+            ${fileContext ? `Context from uploaded file:\n${fileContext}` : ''}
+            
+            Provide a helpful, professional, and academically rigorous response.`;
+
+        try {
+            // Check for non-text models first (e.g. if user selected image generation model, handled elsewhere? Assumed generic here)
+            setLoadingStatus("Thinking...");
+            const res = await fetch('/api/gemini', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: 'gemini-3-pro-preview', // Default to smarter model
+                    task: 'chat',
+                    prompt: text,
+                    history: newMessages.slice(0, -1).map(m => ({ role: m.role, parts: [{ text: m.content }] })),
+                    systemInstruction: systemContext
+                }),
+                signal: abortControllerRef.current?.signal // Use abort signal
+            });
+
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+
+            setMessages(prev => [...prev, { role: 'model', content: data.text }]);
+
+        } catch (e: any) {
+            if (e.name === 'AbortError') {
+                console.log('Generation stopped by user');
+                return;
+            }
+            console.error("Chat Error", e);
+            setMessages(prev => [...prev, { role: 'model', content: "Sorry, I encountered an error responding." }]);
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     const handleSendMessage = async (text: string, model: string = 'gemini-2.5-flash', fileContent?: string, fileName?: string, referencedGroups?: string[]) => {
         // Build display message
@@ -208,7 +449,6 @@ export default function ProjectWorkspace() {
         if (fileName) {
             displayText = `📎 ${fileName}\n${text}`;
         }
-        // If groups are referenced, handle them in display text
         if (referencedGroups && referencedGroups.length > 0) {
             const groupNames = referencedGroups.map(gid => researchGroups.find(g => g.id === gid)?.name).filter(Boolean).join(', ');
             displayText = `[Ref Group: ${groupNames}] ${text}`;
@@ -217,6 +457,82 @@ export default function ProjectWorkspace() {
         const newMessages = [...messages, { role: 'user', content: displayText } as Message];
         setMessages(newMessages);
         setIsLoading(true);
+
+        // Start Abort Controller
+        if (abortControllerRef.current) abortControllerRef.current.abort();
+        abortControllerRef.current = new AbortController();
+        const signal = abortControllerRef.current.signal;
+
+        // 0. Intent Detection (If NOT a specific command like "Draft Research Methods" or referencing groups)
+        // If groups are referenced, we skip generic intent detection and go straight to group logic
+        // If it's a specific "Research Methods" draft, we also skip
+        const isSpecificCommand = referencedGroups && referencedGroups.length > 0;
+
+        if (!isSpecificCommand && !text.includes('請為選定的資料庫建立心智圖') && !text.includes('mind map')) {
+            setIsCheckingIntent(true);
+            setLoadingStatus("Understanding request...");
+            try {
+                // Determine user intent with Gemini (Fast Model)
+                const intentRes = await fetch('/api/gemini', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        model: 'gemini-3-flash-preview',
+                        task: 'summary',
+                        prompt: `Analyze the user's message and determine if they want to SEARCH for academic literature/papers.
+                        User Message: "${text}"
+                        
+                        Return JSON ONLY:
+                        {
+                            "isSearch": boolean,
+                            "keywords": "string",
+                            "queries": ["string"],
+                            "scopusCount": number,
+                            "geminiCount": number
+                        }
+                        
+                        Rules:
+                        - isSearch: true ONLY if the user explicitly asks to find/search papers.
+                        - keywords: Create a query based on the CORE TERM + Specific Extensions (Master Query).
+                        - queries: If request > 15 papers, generate multiple distinct Boolean queries to run in batches. Vary the attributes (e.g. Q1: market, Q2: pricing).
+                        - counts: suggest reasonable defaults (e.g. 15).
+                        `
+                    }),
+                    signal
+                });
+
+                const intentData = await intentRes.json();
+                const jsonStr = (intentData.text || '{}').replace(/```json/g, '').replace(/```/g, '').trim();
+                const intent = JSON.parse(jsonStr);
+
+                if (intent.isSearch) {
+                    const searchConfig: SearchConfig = {
+                        keywords: intent.keywords || text,
+                        queries: intent.queries,
+                        scopusCount: intent.scopusCount || 15,
+                        geminiCount: intent.geminiCount || 15,
+                        originalMessage: text
+                    };
+
+                    // Add special confirmation message
+                    setMessages(prev => [...prev, {
+                        role: 'model',
+                        content: JSON.stringify(searchConfig),
+                        type: 'search-confirmation'
+                    } as Message]);
+
+                    setIsCheckingIntent(false);
+                    setIsLoading(false); // Wait for user interaction
+                    return;
+                }
+            } catch (e) {
+                console.warn("Intent detection failed", e);
+                // Fallback to normal flow
+            } finally {
+                setIsCheckingIntent(false);
+            }
+        }
+
+
 
         try {
             // Priority: Check for Group Reference + Request
@@ -739,11 +1055,15 @@ export default function ProjectWorkspace() {
             }
 
             // Check if this is a literature search request
+            // LEGACY: Disabled in favor of AI Intent Detection Flow (Step 0)
+            const isLiteratureSearch = false;
+            /*
             const isLiteratureSearch = text.toLowerCase().includes('文獻') ||
                 text.toLowerCase().includes('paper') ||
                 text.toLowerCase().includes('literature') ||
                 text.toLowerCase().includes('research on') ||
                 (text.toLowerCase().includes('find') && (text.toLowerCase().includes('article') || text.toLowerCase().includes('study')));
+            */
 
             const isSearch = text.toLowerCase().startsWith('find') || text.toLowerCase().includes('search') || text.toLowerCase().includes('找') || isLiteratureSearch;
             let systemContext = '';
@@ -980,6 +1300,7 @@ export default function ProjectWorkspace() {
     const handleAskAI = async (command: string, section: string) => {
         setIsLoading(true);
         try {
+            setLoadingStatus("Thinking...");
             const res = await fetch('/api/gemini', {
                 method: 'POST',
                 body: JSON.stringify({ task: 'summary', prompt: command === 'structure' ? `Generate concise academic paper structure (Markdown).` : `Write content for section '${section}'. \nPaper:\n${paperContent}` })
@@ -1104,6 +1425,22 @@ export default function ProjectWorkspace() {
     }, [currentMapId, mapKey]);
 
     // Auto save map
+    // Auto-save Main Chat Messages
+    useEffect(() => {
+        if (!messages || messages.length === 0 || !user || !projectId) return;
+
+        const canSave = isOwner || (!isReadOnly && targetUserId);
+        if (!canSave || !targetUserId) return;
+
+        const timer = setTimeout(() => {
+            saveProjectData(targetUserId, 'currentChat', { messages }, projectId)
+                .then(() => console.log("Chat Saved"))
+                .catch(e => console.error("Chat Save Failed", e));
+        }, 3000);
+
+        return () => clearTimeout(timer);
+    }, [messages, user, projectId, targetUserId, isOwner, isReadOnly]);
+
     // Auto save map
     const handleAutoSaveMap = React.useCallback((mapData: { nodes: any[], edges: any[] }) => {
         const { nodes, edges } = mapData;
@@ -1341,7 +1678,7 @@ export default function ProjectWorkspace() {
     }
 
     return (
-        <div className="flex h-screen overflow-hidden bg-background text-foreground transition-colors duration-500 relative">
+        <div suppressHydrationWarning className="flex h-screen overflow-hidden bg-background text-foreground transition-colors duration-500 relative">
             {/* Back to Previous Page Button */}
             <button
                 onClick={() => {
@@ -1378,15 +1715,44 @@ export default function ProjectWorkspace() {
                 onNewManuscript={handleNewManuscript}
             />
 
-            {/* Toggle History Button */}
-            <button
-                onClick={() => setHistoryOpen(!historyOpen)}
-                className={`fixed top-1/2 right-0 transform -translate-y-1/2 z-[55] bg-white dark:bg-neutral-800 border border-border/50 p-2 rounded-l-xl shadow-lg transition-transform duration-300 ${historyOpen ? 'translate-x-full' : 'translate-x-0'}`}
+            {/* Toggle History Button - Draggable */}
+            <div
+                className={`fixed right-0 z-[55] transform transition-transform duration-300 ${historyOpen ? 'translate-x-full' : 'translate-x-0'}`}
+                style={{ top: `${historyButtonY}%` }}
+                onMouseDown={(e) => {
+                    e.preventDefault();
+                    const startY = e.clientY;
+                    const startTop = historyButtonY;
+                    let hasMoved = false;
+
+                    const handleMouseMove = (moveEvent: MouseEvent) => {
+                        const deltaY = Math.abs(moveEvent.clientY - startY);
+                        if (deltaY > 5) hasMoved = true; // Threshold for drag detection
+
+                        const newTop = Math.min(90, Math.max(10, startTop + ((moveEvent.clientY - startY) / window.innerHeight) * 100));
+                        setHistoryButtonY(newTop);
+                    };
+
+                    const handleMouseUp = () => {
+                        document.removeEventListener('mousemove', handleMouseMove);
+                        document.removeEventListener('mouseup', handleMouseUp);
+
+                        // Only toggle if it was a click (no significant movement)
+                        if (!hasMoved) {
+                            setHistoryOpen(!historyOpen);
+                        }
+                    };
+
+                    document.addEventListener('mousemove', handleMouseMove);
+                    document.addEventListener('mouseup', handleMouseUp);
+                }}
             >
-                <div className="writing-vertical-lr text-xs font-medium tracking-widest uppercase text-muted-foreground py-2 flex items-center gap-2">
-                    <span className="rotate-180">History</span>
+                <div className="bg-white dark:bg-neutral-800 border border-border/50 p-2 rounded-l-xl shadow-lg cursor-grab active:cursor-grabbing">
+                    <div className="text-xs font-medium tracking-widest uppercase text-muted-foreground py-2 flex items-center gap-2 font-serif" style={{ writingMode: 'vertical-rl' }}>
+                        <span>History</span>
+                    </div>
                 </div>
-            </button>
+            </div>
 
 
             {/* Search / Chat Area */}
@@ -1494,6 +1860,24 @@ export default function ProjectWorkspace() {
                             messages={messages}
                             onSendMessage={handleSendMessage}
                             isLoading={isLoading}
+                            loadingStatus={loadingStatus}
+                            onConfirmSearch={(config) => executeLiteratureSearch(config)}
+                            onStopGeneration={handleStopGeneration}
+                            onCancelSearch={(config, chatOnly) => {
+                                setIsLoading(false);
+                                setLoadingStatus('');
+                                if (chatOnly && config?.originalMessage) {
+                                    // Fallback to normal chat response
+                                    // Filter out any confirmation widgets from history
+                                    const cleanHistory = messages.filter(m => m.type !== 'search-confirmation');
+                                    setIsLoading(true);
+
+                                    if (abortControllerRef.current) abortControllerRef.current.abort();
+                                    abortControllerRef.current = new AbortController();
+
+                                    processChatResponse(config.originalMessage, '', cleanHistory);
+                                }
+                            }}
                         />
                     </div>
                 </main>
@@ -1577,6 +1961,7 @@ export default function ProjectWorkspace() {
                         onRenameGroup={handleRenameGroup}
                         onDeleteGroup={handleDeleteGroup}
                         onAutoSave={handleGroupAutoSave}
+                        projectName={projectDetails?.name}
                     />
                 )}
 
@@ -1590,6 +1975,7 @@ export default function ProjectWorkspace() {
                     </button>
                 )}
             </div>
+
         </div>
     );
 }

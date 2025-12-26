@@ -1,15 +1,17 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Send, User, Sparkles, ArrowUp, ChevronDown, Paperclip, X, FileText } from 'lucide-react';
+import { Send, User, Sparkles, ArrowUp, ChevronDown, Paperclip, X, FileText, Square, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import ArticleList from './ArticleList';
+import SearchConfirmationMessage from './SearchConfirmationMessage';
 
 import Link from 'next/link';
 
 export interface Message {
     role: string;
     content: string;
+    type?: 'text' | 'search-confirmation';
 }
 
 interface ResearchArticle {
@@ -36,6 +38,10 @@ interface ChatInterfaceProps {
     onAddToContext?: (article: any) => void;
     researchGroups?: ResearchGroup[];
     currentGroupId?: string | null;
+    onConfirmSearch?: (config: any) => void;
+    onCancelSearch?: (config: any, chatOnly?: boolean) => void;
+    onStopGeneration?: () => void;
+    loadingStatus?: string;
 }
 
 const GEMINI_MODELS = [
@@ -48,7 +54,7 @@ const GEMINI_MODELS = [
     { id: 'gemini-3-pro-preview', name: '3.0 Pro', desc: '最新' },
 ];
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, onSendMessage, isLoading, articles, onAddToContext, researchGroups = [], currentGroupId }) => {
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, onSendMessage, isLoading, articles, onAddToContext, researchGroups = [], currentGroupId, onConfirmSearch, onCancelSearch, onStopGeneration, loadingStatus }) => {
     const [input, setInput] = useState('');
     const [selectedModel, setSelectedModel] = useState('gemini-3-flash-preview');
     const [showModelDropdown, setShowModelDropdown] = useState(false);
@@ -277,33 +283,47 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, onSendMessage, 
                         {/* Show Search Results above the last AI message */}
                         {idx === messages.length - 1 && msg.role !== 'user' && msg.role !== 'system' && SearchResults}
 
-                        <div className={`flex gap-6 animate-fade-in ${msg.role === 'user' ? 'justify-end' : ''}`}>
-                            {msg.role !== 'user' && msg.role !== 'system' && (
-                                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-neutral-200 to-white dark:from-neutral-800 dark:to-neutral-900 border border-white/50 flex items-center justify-center shadow-sm shrink-0">
-                                    <Sparkles size={14} className="text-black dark:text-white" />
+                        {/* Special Message Types */}
+                        {msg.type === 'search-confirmation' && onConfirmSearch ? (
+                            <div className="flex gap-6 animate-fade-in mb-6">
+                                <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 flex items-center justify-center shrink-0">
+                                    <Sparkles size={14} className="text-blue-600 dark:text-blue-400" />
                                 </div>
-                            )}
+                                <SearchConfirmationMessage
+                                    config={JSON.parse(msg.content)}
+                                    onConfirm={onConfirmSearch}
+                                    onCancel={onCancelSearch || (() => { })}
+                                />
+                            </div>
+                        ) : (
+                            <div className={`flex gap-6 animate-fade-in ${msg.role === 'user' ? 'justify-end' : ''}`}>
+                                {(msg.role !== 'user' && msg.role !== 'system') && (
+                                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-neutral-200 to-white dark:from-neutral-800 dark:to-neutral-900 border border-white/50 flex items-center justify-center shadow-sm shrink-0">
+                                        <Sparkles size={14} className="text-black dark:text-white" />
+                                    </div>
+                                )}
 
-                            <div className={`relative max-w-[85%] text-[15px] leading-relaxed ${msg.role === 'user' ? 'bg-neutral-100 dark:bg-neutral-800 px-5 py-3 rounded-2xl rounded-tr-sm text-foreground' : 'text-foreground'}`}>
-                                {msg.role === 'system' ? (
-                                    <span className="text-xs uppercase tracking-wider text-muted-foreground border border-border px-3 py-1 rounded-full">{msg.content}</span>
-                                ) : msg.role === 'user' ? (
-                                    <div className="whitespace-pre-wrap font-light">{msg.content}</div>
-                                ) : (
-                                    <div className="prose prose-sm dark:prose-invert max-w-none font-light">
-                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                            {msg.content || ''}
-                                        </ReactMarkdown>
+                                <div className={`relative max-w-[85%] text-[15px] leading-relaxed ${msg.role === 'user' ? 'bg-neutral-100 dark:bg-neutral-800 px-5 py-3 rounded-2xl rounded-tr-sm text-foreground' : 'text-foreground'}`}>
+                                    {msg.role === 'system' ? (
+                                        <span className="text-xs uppercase tracking-wider text-muted-foreground border border-border px-3 py-1 rounded-full">{msg.content}</span>
+                                    ) : msg.role === 'user' ? (
+                                        <div className="whitespace-pre-wrap font-light">{msg.content}</div>
+                                    ) : (
+                                        <div className="prose prose-sm dark:prose-invert max-w-none font-light">
+                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                                {msg.content || ''}
+                                            </ReactMarkdown>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {msg.role === 'user' && (
+                                    <div className="w-8 h-8 rounded-full bg-black dark:bg-white flex items-center justify-center shadow-sm shrink-0">
+                                        <User size={14} className="text-white dark:text-black" />
                                     </div>
                                 )}
                             </div>
-
-                            {msg.role === 'user' && (
-                                <div className="w-8 h-8 rounded-full bg-black dark:bg-white flex items-center justify-center shadow-sm shrink-0">
-                                    <User size={14} className="text-white dark:text-black" />
-                                </div>
-                            )}
-                        </div>
+                        )}
                     </React.Fragment>
                 ))}
 
@@ -473,13 +493,22 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, onSendMessage, 
                             </button>
                         )}
 
+                        {isLoading && loadingStatus && (
+                            <div className="absolute -top-10 left-0 right-0 flex justify-center pointer-events-none">
+                                <span className="bg-background/90 text-xs px-3 py-1 rounded-full border border-border/50 shadow-sm flex items-center gap-1.5 animate-in fade-in zoom-in duration-300">
+                                    <Loader2 size={12} className="animate-spin text-primary" />
+                                    {loadingStatus}
+                                </span>
+                            </div>
+                        )}
+
                         <input
                             ref={inputRef}
                             className="flex-1 bg-transparent border-none outline-none px-4 text-foreground placeholder-muted-foreground font-light text-base"
                             placeholder={uploadedFile ? "詢問關於這個檔案..." : "@資料庫 #文獻 ##文獻PDF"}
                             value={input}
                             onChange={handleInputChange}
-                            disabled={isLoading}
+                        // disabled={isLoading} // Allow typing while loading
                         />
 
                         {/* File Upload Button */}
@@ -499,12 +528,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, onSendMessage, 
                             <Paperclip size={18} />
                         </button>
 
-                        <button
-                            disabled={(!input.trim() && !contextData.length && !uploadedFile) || isLoading}
-                            className="w-10 h-10 rounded-full bg-black dark:bg-white text-white dark:text-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100"
-                        >
-                            <ArrowUp size={20} />
-                        </button>
+                        {isLoading && onStopGeneration ? (
+                            <button
+                                type="button"
+                                onClick={onStopGeneration}
+                                className="w-10 h-10 rounded-full bg-neutral-200 dark:bg-neutral-700 text-black dark:text-white flex items-center justify-center hover:bg-neutral-300 dark:hover:bg-neutral-600 transition-all animate-in fade-in zoom-in duration-200"
+                                title="Stop generating"
+                            >
+                                <Square size={14} fill="currentColor" />
+                            </button>
+                        ) : (
+                            <button
+                                disabled={(!input.trim() && !contextData.length && !uploadedFile) || isLoading}
+                                className="w-10 h-10 rounded-full bg-black dark:bg-white text-white dark:text-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100"
+                            >
+                                <ArrowUp size={20} />
+                            </button>
+                        )}
                     </div>
                 </div>
             </form>

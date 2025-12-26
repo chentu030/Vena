@@ -864,7 +864,10 @@ export default function TeamDetailPage() {
         const paperMatch = val.match(/##([\w\s\-\.\,\:\(\)]*)$/);
         if (paperMatch) {
             const query = paperMatch[1].toLowerCase();
-            const filtered = myPapers.filter(p => p.title.toLowerCase().includes(query) || p.authors.toLowerCase().includes(query));
+            const filtered = myPapers.filter(p =>
+                (p.title?.toLowerCase()?.includes(query)) ||
+                (p.authors?.toLowerCase()?.includes(query))
+            );
             setFilteredPapers(filtered);
             setShowPaperPicker(filtered.length > 0);
             setShowProjectPicker(false);
@@ -969,7 +972,7 @@ export default function TeamDetailPage() {
             } else if (isPaperTag) {
                 const paperTitle = tag.slice(2).trim();
                 // Find paper by title (this might be imprecise if titles are not unique, but UI-driven selection ensures 1:1 usually)
-                paper = myPapers.find(p => p.title.toLowerCase() === paperTitle.toLowerCase());
+                paper = myPapers.find(p => p.title && p.title.toLowerCase() === paperTitle.toLowerCase());
             }
 
             // Styling logic
@@ -1132,26 +1135,19 @@ export default function TeamDetailPage() {
             setSelectedFile(null);
             if (fileInputRef.current) fileInputRef.current.value = '';
 
-            // 3. Check for Gemini Tag
-            // Regex to find @gemini... (e.g., @gemini-1.5-pro or just @gemini)
-            const geminiMatch = messageText.match(/@(gemini[-\w.]*)/i);
+            // 3. Check for Gemini Slash Command
+            // Regex to find /gemini... (e.g., /gemini-2.5-flash or just /gemini)
+            const geminiMatch = messageText.match(/\/(gemini[-\w.]*)/i);
             if (geminiMatch) {
-                const taggedModel = geminiMatch[1]; // e.g. "gemini-1.5-pro"
-                // Clean the prompt by removing the tag
-                const prompt = messageText.replace(/@(gemini[-\w.]*)/i, '').trim();
+                const taggedModel = geminiMatch[1]; // e.g. "gemini-2.5-flash"
+                // Clean the prompt by removing the slash command
+                const prompt = messageText.replace(/\/(gemini[-\w.]*)/i, '').trim();
 
-                // Determine model to use (fallback to default if tag is just @gemini)
+                // Determine model to use (fallback to default if tag is just /gemini)
                 let modelToUse = 'gemini-2.5-flash';
-                if (taggedModel.length > 7) { // longer than "@gemini"
-                    // Extract the model part, removing @
-                    // But user likely typed "@gemini-1.5-pro", so we assume the whole tag might be the model name or close to it.
-                    // The gemini_model.txt has "gemini-3-pro-preview" etc.
-                    // We try to match what they typed.
-                    // If they typed "@gemini-3-pro-preview", we use "gemini-3-pro-preview".
-                    // If they typed "@gemini-3", we use "gemini-3-pro-preview" (fuzzy?) No, let's just try validation.
-
-                    // For now, strip '@' and use as model ID.
-                    modelToUse = taggedModel.replace('@', '');
+                if (taggedModel.length > 6) { // longer than "gemini"
+                    // Use the specified model
+                    modelToUse = taggedModel;
                 }
 
                 // If prompt is empty after stripping tag, ignore
@@ -1166,6 +1162,7 @@ export default function TeamDetailPage() {
                 try {
                     const res = await fetch('/api/gemini', {
                         method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             prompt: prompt,
                             model: modelToUse,
