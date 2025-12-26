@@ -236,14 +236,7 @@ export default function Dashboard() {
                         <div className={`w-9 h-9 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold ${user.photoURL ? 'hidden' : ''}`}>
                             {(user.displayName || user.email || 'U')[0].toUpperCase()}
                         </div>
-                        <div className="h-6 w-px bg-border mx-1"></div>
-                        <button
-                            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                            className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-full transition-colors text-muted-foreground hover:text-blue-500"
-                            title="Toggle Theme"
-                        >
-                            {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-                        </button>
+
                         {/* Remove SignOut button here as it is in sidebar */}
                     </div>
                 </header>

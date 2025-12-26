@@ -1,5 +1,7 @@
 import { db } from './firebase';
-import { collection, doc, setDoc, getDocs, deleteDoc, query, orderBy, Timestamp, getDoc, collectionGroup, where, updateDoc, arrayUnion } from 'firebase/firestore';
+import { collection, doc, setDoc, getDocs, deleteDoc, query, orderBy, Timestamp, getDoc, collectionGroup, where, updateDoc, arrayUnion, addDoc, onSnapshot, writeBatch } from 'firebase/firestore';
+
+const GAS_API_URL = "https://script.google.com/macros/s/AKfycbyeGIh0Dg7CKujV3HPDkx__DnyHrVrkiuqGnnow4YXhIQjA10aDifnDU9DntUFgwRTO/exec";
 
 export type CollectionName = 'drafts' | 'maps' | 'manuscripts' | 'research' | 'chats' | 'researchGroups';
 
@@ -17,6 +19,7 @@ export interface ProjectData {
     createdAt: any;
     updatedAt: any;
     userId: string;
+    driveId?: string;
 }
 
 // Helper to construct path
@@ -149,10 +152,63 @@ export const createProject = async (
             userId
         };
 
+        // Create Folder in Drive for Project
+        try {
+            const res = await fetch(GAS_API_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    action: 'create_folder',
+                    name: name,
+                    parentId: null // Root for now, or maybe a 'Projects' folder if we have one
+                })
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                projectData.driveId = data.folderId;
+            }
+        } catch (e) {
+            console.error("GAS Project Folder Creation Failed", e);
+        }
+
         await setDoc(docRef, projectData);
         return newProjectId;
     } catch (e) {
         console.error("Error creating project", e);
+        throw e;
+    }
+};
+
+export const updateTeam = async (teamId: string, updates: Partial<TeamData>) => {
+    try {
+        const docRef = doc(db, 'teams', teamId);
+
+        // If renaming, sync with Drive
+        if (updates.name) {
+            const teamSnap = await getDoc(docRef);
+            const teamData = teamSnap.data() as TeamData;
+
+            if (teamData?.driveId) {
+                try {
+                    await fetch(GAS_API_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            action: 'rename',
+                            id: teamData.driveId,
+                            name: updates.name
+                        })
+                    });
+                } catch (gasError) {
+                    console.error("Failed to rename team folder in Drive", gasError);
+                }
+            }
+        }
+
+        await updateDoc(docRef, {
+            ...updates,
+            updatedAt: Timestamp.now()
+        });
+    } catch (e) {
+        console.error("Error updating team", e);
         throw e;
     }
 };
@@ -234,7 +290,10 @@ export const deleteProject = async (userId: string, projectId: string) => {
 export interface TeamMember {
     uid?: string; // Optional if pending invite
     email: string;
-    role: 'owner' | 'member';
+    role: 'owner' | 'admin' | 'member';
+    status?: 'online' | 'offline' | 'idle' | 'hidden';
+    photoURL?: string;
+    displayName?: string;
 }
 
 export interface TeamData {
@@ -245,6 +304,7 @@ export interface TeamData {
     members: TeamMember[];
     memberEmails: string[]; // For efficient querying
     sharedProjects?: string[]; // Array of Project IDs shared with this team
+    driveId?: string; // Google Drive Folder ID
     createdAt: any;
     updatedAt: any;
 }
@@ -263,18 +323,46 @@ export interface TeamMessage {
 }
 
 // Create a new team
-export const createTeam = async (userId: string, userEmail: string, name: string, description: string = ''): Promise<string> => {
+export const createTeam = async (userId: string, userEmail: string, name: string, description: string = '', photoURL?: string, displayName?: string): Promise<string> => {
     try {
         const newTeamId = `team_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const docRef = doc(db, 'teams', newTeamId);
+
+        let driveId = undefined;
+        // Call GAS to create Team Folder in Drive
+        try {
+            const res = await fetch(GAS_API_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    action: 'create_folder',
+                    name: name,
+                    parentId: null // Create at root
+                })
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                driveId = data.folderId; // Use generic ID from GAS
+            } else {
+                console.warn("GAS Team Folder Creation Failed", data);
+            }
+        } catch (gasError) {
+            console.error("GAS Fetch Error during Team Creation", gasError);
+        }
 
         const teamData: TeamData = {
             id: newTeamId,
             name,
             description,
             ownerId: userId,
-            members: [{ uid: userId, email: userEmail, role: 'owner' }],
+            members: [{
+                uid: userId,
+                email: userEmail,
+                role: 'owner',
+                photoURL: photoURL || '',
+                displayName: displayName || userEmail.split('@')[0]
+            }],
             memberEmails: [userEmail], // Initial member email
+            driveId, // Save Drive Folder ID
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now()
         };
@@ -347,7 +435,7 @@ export const getProjectsByIds = async (projectIds: string[]): Promise<ProjectDat
 };
 
 // Update createTeam to include memberEmails
-export const createTeamWithIndex = async (userId: string, userEmail: string, name: string, description: string = ''): Promise<string> => {
+export const createTeamWithIndex = async (userId: string, userEmail: string, name: string, description: string = '', photoURL?: string, displayName?: string): Promise<string> => {
     try {
         const newTeamId = `team_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const docRef = doc(db, 'teams', newTeamId);
@@ -358,7 +446,13 @@ export const createTeamWithIndex = async (userId: string, userEmail: string, nam
             name,
             description,
             ownerId: userId,
-            members: [{ uid: userId, email: userEmail, role: 'owner' }],
+            members: [{
+                uid: userId,
+                email: userEmail,
+                role: 'owner',
+                photoURL: photoURL || '',
+                displayName: displayName || userEmail.split('@')[0]
+            }],
             memberEmails: [userEmail], // For querying
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now()
@@ -406,10 +500,243 @@ export const inviteMember = async (teamId: string, email: string) => {
     }
 };
 
+// Member Management
+export const removeTeamMember = async (teamId: string, email: string) => {
+    try {
+        const teamRef = doc(db, 'teams', teamId);
+        const teamSnap = await getDoc(teamRef);
+        if (!teamSnap.exists()) return;
+
+        const data = teamSnap.data() as TeamData;
+        const newMembers = (data.members || []).filter(m => m.email !== email);
+        const newEmails = (data.memberEmails || []).filter(e => e !== email);
+
+        await updateDoc(teamRef, {
+            members: newMembers,
+            memberEmails: newEmails
+        });
+    } catch (e) {
+        console.error("Error removing member", e);
+        throw e;
+    }
+};
+
+export const updateTeamMemberRole = async (teamId: string, email: string, role: 'admin' | 'member') => {
+    try {
+        const teamRef = doc(db, 'teams', teamId);
+        const teamSnap = await getDoc(teamRef);
+        if (!teamSnap.exists()) return;
+
+        const data = teamSnap.data() as TeamData;
+        const newMembers = (data.members || []).map(m =>
+            m.email === email ? { ...m, role } : m
+        );
+
+        await updateDoc(teamRef, { members: newMembers });
+    } catch (e) {
+        console.error("Error updating member role", e);
+        throw e;
+    }
+};
+
+export const updateMemberStatus = async (teamId: string, email: string, status: 'online' | 'offline' | 'idle' | 'hidden') => {
+    try {
+        const teamRef = doc(db, 'teams', teamId);
+        const teamSnap = await getDoc(teamRef);
+        if (!teamSnap.exists()) return;
+
+        const data = teamSnap.data() as TeamData;
+        const newMembers = (data.members || []).map(m =>
+            m.email === email ? { ...m, status } : m
+        );
+
+        // This might interpret as a "write" too often for high frequency, but fine for manual status toggle
+        await updateDoc(teamRef, { members: newMembers });
+    } catch (e) {
+        console.error("Error updating member status", e);
+    }
+};
+
+// Project Management
+export const removeProjectFromTeam = async (teamId: string, projectId: string) => {
+    try {
+        const teamRef = doc(db, 'teams', teamId);
+        const teamSnap = await getDoc(teamRef);
+        if (!teamSnap.exists()) return;
+
+        const data = teamSnap.data() as TeamData;
+        const newProjects = (data.sharedProjects || []).filter(id => id !== projectId);
+
+        await updateDoc(teamRef, { sharedProjects: newProjects });
+    } catch (e) {
+        console.error("Error removing project", e);
+        throw e;
+    }
+};
+
+// Cloud Drive / Files
+export interface TeamFile {
+    id: string;
+    name: string;
+    url?: string;
+    type: string; // 'folder' | mimetype
+    size?: number; // bytes
+    parentId: string | null;
+    uploadedBy: string;
+    uploadedAt: any;
+    color?: string;
+    icon?: string;
+    driveId?: string;
+}
+// File Management
+// File Management
+export const renameTeamFile = async (teamId: string, fileId: string, newName: string) => {
+    try {
+        const docRef = doc(db, `teams/${teamId}/files`, fileId);
+
+        // 1. Get current file to check for driveId
+        const fileSnap = await getDoc(docRef);
+        const fileData = fileSnap.data() as TeamFile;
+
+        // 2. If it has a driveId, rename in Drive via GAS
+        if (fileData?.driveId) {
+            const res = await fetch(GAS_API_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    action: 'rename',
+                    id: fileData.driveId,
+                    name: newName
+                })
+            });
+            const data = await res.json();
+            if (data.status !== 'success') {
+                console.warn("GAS Rename warning:", data.message);
+                // Continue to rename in Firestore anyway? Or throw?
+                // Throwing might be safer to keep sync.
+                throw new Error("Failed to rename in Drive: " + data.message);
+            }
+        }
+
+        await updateDoc(docRef, { name: newName });
+    } catch (e) {
+        console.error("Error renaming file", e);
+        throw e;
+    }
+};
+
+export const moveTeamFile = async (teamId: string, fileId: string, newParentId: string | null) => {
+    try {
+        const docRef = doc(db, `teams/${teamId}/files`, fileId);
+        await updateDoc(docRef, { parentId: newParentId });
+    } catch (e) {
+        console.error("Error moving file", e);
+        throw e;
+    }
+};
+
+export const updateFolderStyle = async (teamId: string, fileId: string, color: string, icon: string) => {
+    try {
+        const docRef = doc(db, `teams/${teamId}/files`, fileId);
+        await updateDoc(docRef, { color, icon });
+    } catch (e) {
+        console.error("Error updating folder style", e);
+        throw e;
+    }
+};
+
+export const addTeamFile = async (teamId: string, file: TeamFile) => {
+    try {
+        const filesRef = collection(db, `teams/${teamId}/files`);
+        // Use setDoc with a specific ID if provided, or addDoc
+        if (file.id) {
+            await setDoc(doc(filesRef, file.id), file);
+        } else {
+            await setDoc(doc(filesRef), file);
+        }
+    } catch (e) {
+        console.error("Error adding team file", e);
+        throw e;
+    }
+};
+
+export const createTeamFolder = async (teamId: string, name: string, parentId: string | null = null, createdBy: string, color?: string, icon?: string) => {
+    try {
+        const folderId = `folder_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const docRef = doc(db, `teams/${teamId}/files`, folderId);
+
+        let driveId = undefined;
+        let driveUrl = undefined;
+
+        // 1. Determine parent Drive ID
+        let parentDriveId = null;
+        if (parentId) {
+            const parentDoc = await getDoc(doc(db, `teams/${teamId}/files`, parentId));
+            if (parentDoc.exists()) {
+                parentDriveId = parentDoc.data().driveId;
+            }
+        } else {
+            const teamDoc = await getDoc(doc(db, 'teams', teamId));
+            if (teamDoc.exists()) {
+                parentDriveId = teamDoc.data().driveId;
+            }
+        }
+
+        // 2. Call GAS to create folder in Drive
+        try {
+            const res = await fetch(GAS_API_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    action: 'create_folder',
+                    name: name,
+                    parentId: parentDriveId // If null, GAS defaults to ROOT_FOLDER_ID
+                })
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                driveId = data.folderId;
+                driveUrl = data.url;
+            } else {
+                console.error("GAS Create Folder Failed", data);
+            }
+        } catch (gasError) {
+            console.error("GAS Fetch Error", gasError);
+        }
+
+        await setDoc(docRef, {
+            id: folderId,
+            name,
+            type: 'folder',
+            parentId,
+            driveId, // Save Drive ID
+            url: driveUrl,
+            uploadedBy: createdBy,
+            uploadedAt: Timestamp.now(),
+            color: color || 'blue',
+            icon: icon || 'Folder'
+        });
+
+        return folderId;
+    } catch (e) {
+        console.error("Error creating folder", e);
+        throw e;
+    }
+};
+
+export const removeTeamFile = async (teamId: string, fileId: string) => {
+    try {
+        await deleteDoc(doc(db, `teams/${teamId}/files`, fileId));
+    } catch (e) {
+        console.error("Error removing file", e);
+        throw e;
+    }
+};
+
 // Chat Functions
 export const sendTeamMessage = async (teamId: string, senderId: string, senderName: string, text: string, attachments: any[] = []) => {
     try {
         const messagesRef = collection(db, `teams/${teamId}/messages`);
+
+        // Add message
         await setDoc(doc(messagesRef), {
             text,
             senderId,
@@ -417,6 +744,9 @@ export const sendTeamMessage = async (teamId: string, senderId: string, senderNa
             attachments,
             createdAt: Timestamp.now()
         });
+
+        // Note: Attachments are saved to the '聊天室資料' folder by the frontend (page.tsx)
+        // Do NOT save again here to avoid duplicates
     } catch (e) {
         console.error("Error sending message", e);
         throw e;
@@ -424,3 +754,72 @@ export const sendTeamMessage = async (teamId: string, senderId: string, senderNa
 };
 
 // Real-time listener for messages will be done in the component using onSnapshot
+
+// Research Management
+export const getUserResearchGroups = async (userId: string) => {
+    return await loadCollection(userId, 'researchGroups');
+};
+
+// User Management Helpers
+export const getUsersByEmails = async (emails: string[]) => {
+    if (!emails || emails.length === 0) return [];
+    try {
+        // Firestore 'in' query supports up to 10 values (or 30? usually 10 for OR, 30 for IN). Safest is chunking by 10.
+        const chunks = [];
+        for (let i = 0; i < emails.length; i += 10) {
+            chunks.push(emails.slice(i, i + 10));
+        }
+
+        const results: any[] = [];
+        for (const chunk of chunks) {
+            const q = query(collection(db, 'users'), where('email', 'in', chunk));
+            const snap = await getDocs(q);
+            snap.forEach(doc => results.push({ id: doc.id, ...doc.data() }));
+        }
+        return results;
+    } catch (e) {
+        console.error("Error fetching users by emails", e);
+        return [];
+    }
+};
+
+export const subscribeToFileMessages = (teamId: string, fileId: string, callback: (msgs: any[]) => void) => {
+    const q = query(collection(db, `teams/${teamId}/files/${fileId}/messages`), orderBy('createdAt', 'asc'));
+    return onSnapshot(q, (snapshot) => {
+        const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        callback(msgs);
+    });
+};
+
+export const sendTeamFileMessage = async (teamId: string, fileId: string, message: any) => {
+    const colRef = collection(db, `teams/${teamId}/files/${fileId}/messages`);
+    await addDoc(colRef, {
+        ...message,
+        createdAt: Timestamp.now()
+    });
+};
+
+// AI Chat History Functions (Private per user)
+export const subscribeToAiChatHistory = (userId: string, teamId: string, fileId: string, callback: (msgs: any[]) => void) => {
+    const q = query(collection(db, `users/${userId}/fileAiChats/${teamId}_${fileId}/messages`), orderBy('createdAt', 'asc'));
+    return onSnapshot(q, (snapshot) => {
+        const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        callback(msgs);
+    });
+};
+
+export const addAiChatMessage = async (userId: string, teamId: string, fileId: string, message: { role: 'user' | 'model'; text: string }) => {
+    const colRef = collection(db, `users/${userId}/fileAiChats/${teamId}_${fileId}/messages`);
+    await addDoc(colRef, {
+        ...message,
+        createdAt: Timestamp.now()
+    });
+};
+
+export const clearAiChatHistory = async (userId: string, teamId: string, fileId: string) => {
+    const colRef = collection(db, `users/${userId}/fileAiChats/${teamId}_${fileId}/messages`);
+    const snapshot = await getDocs(colRef);
+    const batch = writeBatch(db);
+    snapshot.docs.forEach(doc => batch.delete(doc.ref));
+    await batch.commit();
+};

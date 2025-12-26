@@ -74,11 +74,10 @@ export default function TeamsDashboard() {
             <div className="flex-1 min-w-0 flex flex-col">
                 {/* Header */}
                 <header className="h-20 px-8 flex justify-between items-center bg-white/70 dark:bg-black/70 backdrop-blur-xl border-b border-border sticky top-0 z-30">
-                    <div>
-                        <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400 bg-clip-text text-transparent">
-                            My Teams
-                        </h1>
-                        <p className="text-sm text-muted-foreground">Collaborate with your research group</p>
+                    <div className="flex items-center space-x-4">
+                        <div className="flex items-center space-x-3">
+                            <span className="text-xl font-bold tracking-tight font-serif">Teams</span>
+                        </div>
                     </div>
 
                     <button
@@ -90,7 +89,14 @@ export default function TeamsDashboard() {
                     </button>
                 </header>
 
-                <main className="flex-1 p-8 overflow-y-auto">
+                <main className="flex-1 p-8 overflow-y-auto max-w-7xl mx-auto w-full">
+                    <div className="mb-10 text-center">
+                        <h1 className="text-4xl font-bold mb-4 font-serif">My Teams</h1>
+                        <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+                            Collaborate with your research group
+                        </p>
+                    </div>
+
                     {isLoadingTeams ? (
                         <div className="flex justify-center py-20">
                             <Loader2 className="animate-spin text-muted-foreground" size={32} />

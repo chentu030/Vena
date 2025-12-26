@@ -1,12 +1,16 @@
+'use client';
+
 import React, { useState } from 'react';
-import { LayoutDashboard, Compass, Settings, LogOut, ChevronLeft, ChevronRight, Users } from 'lucide-react';
+import { LayoutDashboard, Compass, Settings, LogOut, ChevronLeft, ChevronRight, Users, MessageSquare, Sun, Moon } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
+import { useTheme } from 'next-themes';
 import { useAuth } from '@/lib/auth';
 
 export default function Sidebar() {
     const router = useRouter();
     const pathname = usePathname();
     const { signOut } = useAuth();
+    const { theme, setTheme } = useTheme();
     const [isCollapsed, setIsCollapsed] = useState(false);
 
     const menuItems = [
@@ -55,7 +59,23 @@ export default function Sidebar() {
                 </button>
             </div>
 
-            <div className="p-4 border-t border-border">
+            <div className="p-4 border-t border-border space-y-2">
+                <button
+                    onClick={() => router.push('/feedback')}
+                    className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'space-x-3 px-4'} py-3 rounded-xl text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors`}
+                    title={isCollapsed ? "Feedback" : ""}
+                >
+                    <MessageSquare size={20} />
+                    {!isCollapsed && <span>Feedback</span>}
+                </button>
+                <button
+                    onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                    className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'space-x-3 px-4'} py-3 rounded-xl text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors`}
+                    title={isCollapsed ? "Toggle Theme" : ""}
+                >
+                    {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+                    {!isCollapsed && <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>}
+                </button>
                 <button
                     onClick={() => signOut()}
                     className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'space-x-3 px-4'} py-3 rounded-xl text-muted-foreground hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 transition-colors`}

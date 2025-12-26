@@ -146,18 +146,18 @@ export const ICON_OPTIONS = [
 
 // Color options for projects
 export const COLOR_OPTIONS = [
-    { name: 'blue', bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-600 dark:text-blue-400', accent: 'bg-blue-500', ring: 'ring-blue-500' },
-    { name: 'purple', bg: 'bg-purple-100 dark:bg-purple-900/30', text: 'text-purple-600 dark:text-purple-400', accent: 'bg-purple-500', ring: 'ring-purple-500' },
-    { name: 'green', bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-600 dark:text-green-400', accent: 'bg-green-500', ring: 'ring-green-500' },
-    { name: 'orange', bg: 'bg-orange-100 dark:bg-orange-900/30', text: 'text-orange-600 dark:text-orange-400', accent: 'bg-orange-500', ring: 'ring-orange-500' },
-    { name: 'pink', bg: 'bg-pink-100 dark:bg-pink-900/30', text: 'text-pink-600 dark:text-pink-400', accent: 'bg-pink-500', ring: 'ring-pink-500' },
-    { name: 'cyan', bg: 'bg-cyan-100 dark:bg-cyan-900/30', text: 'text-cyan-600 dark:text-cyan-400', accent: 'bg-cyan-500', ring: 'ring-cyan-500' },
-    { name: 'amber', bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-600 dark:text-amber-400', accent: 'bg-amber-500', ring: 'ring-amber-500' },
-    { name: 'rose', bg: 'bg-rose-100 dark:bg-rose-900/30', text: 'text-rose-600 dark:text-rose-400', accent: 'bg-rose-500', ring: 'ring-rose-500' },
-    { name: 'indigo', bg: 'bg-indigo-100 dark:bg-indigo-900/30', text: 'text-indigo-600 dark:text-indigo-400', accent: 'bg-indigo-500', ring: 'ring-indigo-500' },
-    { name: 'teal', bg: 'bg-teal-100 dark:bg-teal-900/30', text: 'text-teal-600 dark:text-teal-400', accent: 'bg-teal-500', ring: 'ring-teal-500' },
-    { name: 'red', bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-600 dark:text-red-400', accent: 'bg-red-500', ring: 'ring-red-500' },
-    { name: 'slate', bg: 'bg-slate-100 dark:bg-slate-800', text: 'text-slate-600 dark:text-slate-400', accent: 'bg-slate-500', ring: 'ring-slate-500' },
+    { name: 'blue', bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-600 dark:text-blue-400', accent: 'bg-blue-500', ring: 'ring-blue-500', fill: 'fill-blue-100 dark:fill-blue-900/30' },
+    { name: 'purple', bg: 'bg-purple-100 dark:bg-purple-900/30', text: 'text-purple-600 dark:text-purple-400', accent: 'bg-purple-500', ring: 'ring-purple-500', fill: 'fill-purple-100 dark:fill-purple-900/30' },
+    { name: 'green', bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-600 dark:text-green-400', accent: 'bg-green-500', ring: 'ring-green-500', fill: 'fill-green-100 dark:fill-green-900/30' },
+    { name: 'orange', bg: 'bg-orange-100 dark:bg-orange-900/30', text: 'text-orange-600 dark:text-orange-400', accent: 'bg-orange-500', ring: 'ring-orange-500', fill: 'fill-orange-100 dark:fill-orange-900/30' },
+    { name: 'pink', bg: 'bg-pink-100 dark:bg-pink-900/30', text: 'text-pink-600 dark:text-pink-400', accent: 'bg-pink-500', ring: 'ring-pink-500', fill: 'fill-pink-100 dark:fill-pink-900/30' },
+    { name: 'cyan', bg: 'bg-cyan-100 dark:bg-cyan-900/30', text: 'text-cyan-600 dark:text-cyan-400', accent: 'bg-cyan-500', ring: 'ring-cyan-500', fill: 'fill-cyan-100 dark:fill-cyan-900/30' },
+    { name: 'amber', bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-600 dark:text-amber-400', accent: 'bg-amber-500', ring: 'ring-amber-500', fill: 'fill-amber-100 dark:fill-amber-900/30' },
+    { name: 'rose', bg: 'bg-rose-100 dark:bg-rose-900/30', text: 'text-rose-600 dark:text-rose-400', accent: 'bg-rose-500', ring: 'ring-rose-500', fill: 'fill-rose-100 dark:fill-rose-900/30' },
+    { name: 'indigo', bg: 'bg-indigo-100 dark:bg-indigo-900/30', text: 'text-indigo-600 dark:text-indigo-400', accent: 'bg-indigo-500', ring: 'ring-indigo-500', fill: 'fill-indigo-100 dark:fill-indigo-900/30' },
+    { name: 'teal', bg: 'bg-teal-100 dark:bg-teal-900/30', text: 'text-teal-600 dark:text-teal-400', accent: 'bg-teal-500', ring: 'ring-teal-500', fill: 'fill-teal-100 dark:fill-teal-900/30' },
+    { name: 'red', bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-600 dark:text-red-400', accent: 'bg-red-500', ring: 'ring-red-500', fill: 'fill-red-100 dark:fill-red-900/30' },
+    { name: 'slate', bg: 'bg-slate-100 dark:bg-slate-800', text: 'text-slate-600 dark:text-slate-400', accent: 'bg-slate-500', ring: 'ring-slate-500', fill: 'fill-slate-100 dark:fill-slate-800' },
 ];
 
 export const getIconComponent = (iconName: string) => {
