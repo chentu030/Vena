@@ -33,7 +33,7 @@ interface AnalysisState {
 
 interface AnalysisContextType {
     state: AnalysisState;
-    startAnalysis: (articles: ResearchArticle[], projectId: string, groupId: string, userId: string) => void;
+    startAnalysis: (articles: ResearchArticle[], projectId: string, groupId: string, userId: string, onArticleUpdate?: (article: ResearchArticle) => void) => void;
     startCheckPdf: (articles: ResearchArticle[], projectId: string, groupId: string, userId: string, projectName: string, groupName: string, onArticleUpdate?: (article: ResearchArticle) => void, retryFailed?: boolean) => void;
     cancelAnalysis: () => void;
     toggleWidget: () => void;
@@ -51,7 +51,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
 
     const abortControllerRef = useRef<AbortController | null>(null);
 
-    const startAnalysis = async (articles: ResearchArticle[], projectId: string, groupId: string, userId: string) => {
+    const startAnalysis = async (articles: ResearchArticle[], projectId: string, groupId: string, userId: string, onArticleUpdate?: (article: ResearchArticle) => void) => {
         if (isAnalyzing) return;
 
         setIsAnalyzing(true);
@@ -101,7 +101,6 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
                 
                 Task:
                 1. Standardize "authors" (Last, F. M.).
-                1. Standardize "authors" (Last, F. M.).
                 2. Extract/Verify "year".
                 3. Estimate "page count" if missing.
                 4. Extract "keywords" (if missing, generate 5 relevant ones in English, comma separated).
@@ -140,7 +139,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
                         const parsed = JSON.parse(jsonStr);
 
                         // Update Article
-                        workingResults[originalIndex] = {
+                        const updatedArticle = {
                             ...article,
                             authors: parsed.authors || article.authors,
                             year: parsed.year || article.year,
@@ -149,6 +148,11 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
                             abstract: parsed.abstract || article.abstract,
                             methodology: parsed.methodology || ''
                         };
+
+                        workingResults[originalIndex] = updatedArticle;
+
+                        // Notify UI update
+                        if (onArticleUpdate) onArticleUpdate(updatedArticle);
 
                         // IMMEDIATE SAVE TO FIRESTORE
                         // Path: users/{userId}/projects/{projectId}/researchGroups/{groupId}

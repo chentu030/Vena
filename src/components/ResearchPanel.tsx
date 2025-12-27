@@ -562,7 +562,9 @@ Output only the keywords:`
         // We pass the current results to fill gaps
         const groupIdToUse = currentGroupId || 'default'; // Ensure a group ID
 
-        startAnalysis(results as any, projectId, groupIdToUse, targetUserId);
+        startAnalysis(results as any, projectId, groupIdToUse, targetUserId, (updatedArticle: any) => {
+            setResults(prev => prev.map(p => p.id === updatedArticle.id ? { ...p, ...updatedArticle } : p));
+        });
     };
 
     const exportCSV = () => {
