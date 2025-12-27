@@ -125,6 +125,14 @@ export async function POST(req: NextRequest) {
             const buffer = Buffer.from(arrayBuffer);
             const contentType = pdfResponse.headers.get('content-type') || 'application/pdf';
 
+            // Validate Magic Bytes
+            // A valid PDF file starts with "%PDF-"
+            const head = buffer.subarray(0, 5).toString('utf-8');
+            if (!head.startsWith('%PDF-')) {
+                console.warn(`[PDF Proxy] Invalid Magic Bytes: ${head}. Content-Type was ${contentType}. Rejecting.`);
+                return NextResponse.json({ error: 'URL did not return a valid PDF file (invalid magic bytes)' }, { status: 400 });
+            }
+
             return new NextResponse(buffer, {
                 headers: {
                     'Content-Type': contentType,
