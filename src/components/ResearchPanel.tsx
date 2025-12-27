@@ -186,6 +186,7 @@ export default function ResearchPanel({ onClose, initialResults, onSave, groups 
     };
 
     // Handle PDF file upload to Google Drive via GAS
+    // 支援大檔案分塊上傳 (超過 2MB 時自動分塊)
     const handlePdfUpload = async (file: File, articleId: string) => {
         if (!GAS_URL) {
             alert('Google Apps Script URL not configured');
@@ -193,6 +194,10 @@ export default function ResearchPanel({ onClose, initialResults, onSave, groups 
         }
 
         setUploadingPdfId(articleId);
+
+        // 分塊大小：1.5MB（Base64 後約 2MB，安全在大多數限制內）
+        const CHUNK_SIZE = 1.5 * 1024 * 1024;
+        const MAX_DIRECT_SIZE = 2 * 1024 * 1024; // 超過 2MB 就分塊
 
         try {
             // Fetch driveFolderId from Firestore for the current group
@@ -209,87 +214,170 @@ export default function ResearchPanel({ onClose, initialResults, onSave, groups 
                 }
             }
 
-            // Convert file to Base64
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
+            const article = results.find(r => r.id === articleId);
+            const filename = `paper_${article?.year || 'unknown'}_${article?.title?.substring(0, 30).replace(/[^a-z0-9]/gi, '_') || articleId}.pdf`;
 
-            reader.onload = async () => {
-                const base64Content = (reader.result as string).split(',')[1];
-                const article = results.find(r => r.id === articleId);
-                const filename = `paper_${article?.year || 'unknown'}_${article?.title?.substring(0, 30).replace(/[^a-z0-9]/gi, '_') || articleId}.pdf`;
+            // 讀取檔案為 ArrayBuffer
+            const arrayBuffer = await file.arrayBuffer();
+            const uint8Array = new Uint8Array(arrayBuffer);
 
-                try {
-                    // Use local proxy API to bypass CORS
+            // 轉換為 Base64
+            const base64Content = btoa(
+                uint8Array.reduce((data, byte) => data + String.fromCharCode(byte), '')
+            );
+
+            // 檢查檔案大小
+            if (file.size <= MAX_DIRECT_SIZE) {
+                // 小檔案：直接上傳
+                setProgress(`📤 Uploading PDF (${(file.size / 1024 / 1024).toFixed(2)} MB)...`);
+
+                const response = await fetch('/api/upload-pdf', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'upload',
+                        filename: filename,
+                        mimeType: 'application/pdf',
+                        fileContent: base64Content,
+                        parentId: parentId
+                    })
+                });
+
+                await handleUploadResponse(response, articleId, filename, article);
+            } else {
+                // 大檔案：分塊累積後上傳
+                const totalChunks = Math.ceil(base64Content.length / CHUNK_SIZE);
+                setProgress(`📤 Preparing large PDF (${(file.size / 1024 / 1024).toFixed(2)} MB, ${totalChunks} chunks)...`);
+
+                // 分塊處理，但在客戶端累積
+                const chunks: string[] = [];
+                for (let i = 0; i < totalChunks; i++) {
+                    const start = i * CHUNK_SIZE;
+                    const end = Math.min(start + CHUNK_SIZE, base64Content.length);
+                    chunks.push(base64Content.substring(start, end));
+
+                    // 更新進度
+                    const progress = ((i + 1) / totalChunks * 100).toFixed(0);
+                    setProgress(`📤 Processing chunk ${i + 1}/${totalChunks} (${progress}%)...`);
+
+                    // 給 UI 時間更新
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                }
+
+                // 重新組合並上傳
+                setProgress(`📤 Uploading complete file to Google Drive...`);
+                const completeBase64 = chunks.join('');
+
+                // 分批上傳策略：如果仍然太大，使用初始化-分塊-完成模式
+                if (completeBase64.length > 3 * 1024 * 1024) {
+                    // 使用服務端分塊累積
+                    const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+                    // 分塊上傳到服務端
+                    const uploadChunkSize = 500 * 1024; // 500KB per request
+                    const serverChunks = Math.ceil(completeBase64.length / uploadChunkSize);
+
+                    for (let i = 0; i < serverChunks; i++) {
+                        const start = i * uploadChunkSize;
+                        const end = Math.min(start + uploadChunkSize, completeBase64.length);
+                        const chunkData = completeBase64.substring(start, end);
+
+                        setProgress(`📤 Uploading part ${i + 1}/${serverChunks}...`);
+
+                        await fetch('/api/upload-pdf', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                action: 'chunked-upload',
+                                sessionId: sessionId,
+                                chunkIndex: i,
+                                chunkData: chunkData,
+                                filename: filename,
+                                parentId: parentId
+                            })
+                        });
+                    }
+
+                    // 完成上傳
+                    setProgress(`📤 Finalizing upload...`);
                     const response = await fetch('/api/upload-pdf', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            action: 'complete-chunked-upload',
+                            sessionId: sessionId,
+                            filename: filename,
+                            mimeType: 'application/pdf',
+                            parentId: parentId,
+                            fileContent: completeBase64 // 備用：如果 GAS 不支援分塊合併
+                        })
+                    });
+
+                    await handleUploadResponse(response, articleId, filename, article);
+                } else {
+                    // 直接上傳重組後的內容
+                    const response = await fetch('/api/upload-pdf', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             action: 'upload',
                             filename: filename,
                             mimeType: 'application/pdf',
-                            fileContent: base64Content,
-                            parentId: parentId // Pass folder ID to GAS
+                            fileContent: completeBase64,
+                            parentId: parentId
                         })
                     });
 
-                    // Try to parse the response
-                    let driveUrl = '';
-                    try {
-                        const result = await response.json();
-                        if (result.status === 'success' && result.url) {
-                            driveUrl = result.url;
-                        } else {
-                            console.log('GAS response:', result);
-                            // If we can't get URL, create a search link to Drive
-                            driveUrl = `https://drive.google.com/drive/search?q=${encodeURIComponent(filename)}`;
-                        }
-                    } catch {
-                        // If JSON parsing fails, create a search link
-                        driveUrl = `https://drive.google.com/drive/search?q=${encodeURIComponent(filename)}`;
-                    }
-
-                    // Update article with the Drive URL
-                    const newArticleState = (prev: ResearchArticle[]) => prev.map(a =>
-                        a.id === articleId
-                            ? { ...a, pdfUrl: driveUrl, pdfStatus: 'success' as const }
-                            : a
-                    );
-
-                    setResults(prev => {
-                        const updated = newArticleState(prev);
-                        // Trigger immediate save to prevent data loss on refresh
-                        if (onAutoSave) {
-                            onAutoSave(updated);
-                            // Update ref to prevent double-save by effect
-                            // However, sanitization happens in effect. It's safer to let effect run too or update ref here.
-                            // Let's just fire it. The effect has a check for "currentStr === lastSavedRef.current".
-                            // So we should update lastSavedRef here too if we want to skip effect, OR just let it fire twice (redundant write but safe).
-                            // Better: Just fire it.
-                        }
-                        return updated;
-                    });
-
-                    setProgress(`✅ PDF uploaded: ${article?.title?.substring(0, 40)}...`);
-
-                } catch (error) {
-                    console.error('PDF upload error:', error);
-                    alert('PDF upload failed. Please check GAS configuration.');
+                    await handleUploadResponse(response, articleId, filename, article);
                 }
-
-                setUploadingPdfId(null);
-                setSelectedArticleId(null);
-            };
-
-            reader.onerror = () => {
-                alert('Failed to read file');
-                setUploadingPdfId(null);
-            };
+            }
 
         } catch (error) {
             console.error('PDF upload error:', error);
+            alert('PDF upload failed. Please check GAS configuration.');
             setUploadingPdfId(null);
+        }
+    };
+
+    // Helper function to handle upload response
+    const handleUploadResponse = async (response: Response, articleId: string, filename: string, article: ResearchArticle | undefined) => {
+        try {
+            let driveUrl = '';
+            try {
+                const result = await response.json();
+                if (result.status === 'success' && result.url) {
+                    driveUrl = result.url;
+                } else {
+                    console.log('GAS response:', result);
+                    driveUrl = `https://drive.google.com/drive/search?q=${encodeURIComponent(filename)}`;
+                }
+            } catch {
+                driveUrl = `https://drive.google.com/drive/search?q=${encodeURIComponent(filename)}`;
+            }
+
+            // Update article with the Drive URL
+            const newArticleState = (prev: ResearchArticle[]) => prev.map(a =>
+                a.id === articleId
+                    ? { ...a, pdfUrl: driveUrl, pdfStatus: 'success' as const }
+                    : a
+            );
+
+            setResults(prev => {
+                const updated = newArticleState(prev);
+                if (onAutoSave) {
+                    onAutoSave(updated);
+                }
+                return updated;
+            });
+
+            setProgress(`✅ PDF uploaded: ${article?.title?.substring(0, 40)}...`);
+
+        } catch (error) {
+            console.error('PDF upload error:', error);
+            alert('PDF upload failed. Please check GAS configuration.');
+        } finally {
+            setUploadingPdfId(null);
+            setSelectedArticleId(null);
         }
     };
 
