@@ -82,6 +82,7 @@ export default function ProjectWorkspace() {
     // Research Groups
     const [researchGroups, setResearchGroups] = useState<any[]>([]);
     const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
+    const [latestSearchResults, setLatestSearchResults] = useState<any[]>([]); // New state for ephemeral search results
 
     // Features State
     const [articles, setArticles] = useState<any[]>([]);
@@ -380,6 +381,7 @@ export default function ProjectWorkspace() {
 
             const mergedResults = [...currentResearchResults, ...uniquePapers];
             setCurrentResearchResults(mergedResults);
+            setLatestSearchResults(uniquePapers); // Update ephemeral results with only NEW papers
 
             const skippedCount = newPapers.length - uniquePapers.length;
             const statusMsg = uniquePapers.length > 0
@@ -447,6 +449,7 @@ export default function ProjectWorkspace() {
     };
 
     const handleSendMessage = async (text: string, model: string = 'gemini-2.5-flash', fileContent?: string, fileName?: string, referencedGroups?: string[]) => {
+        setLatestSearchResults([]); // Clear previous search results on new message
         // Build display message
         let displayText = text;
         if (fileName) {
@@ -1866,7 +1869,7 @@ export default function ProjectWorkspace() {
                             loadingStatus={loadingStatus}
                             researchGroups={researchGroups}
                             currentGroupId={currentGroupId}
-                            articles={currentResearchResults}
+                            articles={latestSearchResults}
                             onConfirmSearch={(config) => executeLiteratureSearch(config)}
                             onStopGeneration={handleStopGeneration}
                             onCancelSearch={(config, chatOnly) => {

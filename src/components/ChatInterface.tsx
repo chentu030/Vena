@@ -58,7 +58,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, onSendMessage, 
     const [input, setInput] = useState('');
     const [selectedModel, setSelectedModel] = useState('gemini-3-flash-preview');
     const [showModelDropdown, setShowModelDropdown] = useState(false);
-    const [showResults, setShowResults] = useState(true);
+    const [showResults, setShowResults] = useState(false);
     const [uploadedFile, setUploadedFile] = useState<{ name: string; content: string } | null>(null);
     const [contextData, setContextData] = useState<{ type: 'group' | 'paper' | 'pdf'; name: string; content: string; id: string; pdfUrl?: string }[]>([]);
 
