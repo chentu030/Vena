@@ -11,15 +11,23 @@ export async function POST(req: NextRequest) {
 
         // Helper to fetch with browser headers
         const fetchWithHeaders = async (targetUrl: string) => {
-            return fetch(targetUrl, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.5'
-                },
-                redirect: 'follow',
-                signal: AbortSignal.timeout(15000) // 15s timeout
-            });
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), 15000); // 15s timeout
+
+            try {
+                const response = await fetch(targetUrl, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.5'
+                    },
+                    redirect: 'follow',
+                    signal: controller.signal
+                });
+                return response;
+            } finally {
+                clearTimeout(id);
+            }
         };
 
         // Recursive crawler function
