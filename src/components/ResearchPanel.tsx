@@ -247,11 +247,25 @@ export default function ResearchPanel({ onClose, initialResults, onSave, groups 
                     }
 
                     // Update article with the Drive URL
-                    setResults(prev => prev.map(a =>
+                    const newArticleState = prev => prev.map(a =>
                         a.id === articleId
                             ? { ...a, pdfUrl: driveUrl, pdfStatus: 'success' }
                             : a
-                    ));
+                    );
+
+                    setResults(prev => {
+                        const updated = newArticleState(prev);
+                        // Trigger immediate save to prevent data loss on refresh
+                        if (onAutoSave) {
+                            onAutoSave(updated);
+                            // Update ref to prevent double-save by effect
+                            // However, sanitization happens in effect. It's safer to let effect run too or update ref here.
+                            // Let's just fire it. The effect has a check for "currentStr === lastSavedRef.current".
+                            // So we should update lastSavedRef here too if we want to skip effect, OR just let it fire twice (redundant write but safe).
+                            // Better: Just fire it.
+                        }
+                        return updated;
+                    });
 
                     setProgress(`✅ PDF uploaded: ${article?.title?.substring(0, 40)}...`);
 
