@@ -313,35 +313,46 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
                 });
 
                 try {
-                    // 1. Find and Verify PDF (Try models sequentially)
+                    // 1. Find and Verify PDF (Try Title strategy, then DOI strategy)
                     let finalSuccess = false;
-                    let searchModels = ['gemini-3-flash-preview'];
 
-                    for (const model of searchModels) {
+                    const strategies = [
+                        { name: 'Title Search', promptContext: `"${article.title}" filetype:pdf OR "${article.title}" download` },
+                        { name: 'DOI Search', promptContext: article.doi ? `${article.doi} filetype:pdf OR ${article.doi} download` : null }
+                    ];
+
+                    for (const strategy of strategies) {
                         if (signal.aborted) break;
-                        if (finalSuccess) break; // Already succeeded with a previous model
+                        if (finalSuccess) break;
+                        if (!strategy.promptContext) continue; // Skip if no DOI
 
                         let directPdfUrl = null;
 
                         setProgress({
                             current: idx + 1,
                             total: toCheck.length,
-                            message: `Processing ${idx + 1}/${toCheck.length}: Finding PDF (${model === 'gemini-2.5-flash' ? 'Fast' : 'Deep'})...`
+                            message: `Processing ${idx + 1}/${toCheck.length}: Finding PDF (${strategy.name})...`
                         });
 
-                        const prompt = `Task: Find a direct PDF download link for this academic paper.
-                        Paper: "${article.title}" by ${article.authors} (${article.year})
+                        const prompt = `Task: Find a direct PDF download link or a high-confidence download page for this academic paper.
+                        Search Query: ${strategy.promptContext}
+                        
                         Instructions:
-                        1. Use Google Search to find a PDF version.
-                        2. Look for links ending in .pdf or from reputable repositories (ResearchGate, arXiv, University servers).
-                        3. Return JSON ONLY: { "pdfUrl": "https://..." } or { "pdfUrl": null }`;
+                        1. Execute the search query.
+                        2. SCAN THE TOP 10 SEARCH RESULTS.
+                        3. Look for direct .pdf links or landing pages (like ResearchGate, MDPI, arXiv, University Repositories) that offer a PDF.
+                        4. Prioritize:
+                           - Direct .pdf URLs.
+                           - Reputable repositories (e.g. researchgate.net, arxiv.org, mdpi.com).
+                        5. Return JSON ONLY: { "pdfUrl": "https://..." } or { "pdfUrl": null }
+                        `;
 
                         try {
                             const res = await fetch('/api/gemini', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
-                                    model: model,
+                                    model: 'gemini-3-flash-preview', // User didn't specify, flash is fast for iterative search
                                     task: 'summary',
                                     prompt: prompt,
                                     useGrounding: true
@@ -358,12 +369,12 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
                                 }
                             }
                         } catch (e) {
-                            console.log(`PDF Search failed with ${model}`, e);
+                            console.log(`PDF Search failed with strategy ${strategy.name}`, e);
                         }
 
                         if (directPdfUrl) {
                             // 2. Try to Download PDF Blob via Proxy to VERIFY it works
-                            setProgress(prev => ({ ...prev, message: `Processing ${idx + 1}/${toCheck.length}: Verifying Download...` }));
+                            setProgress(prev => ({ ...prev, message: `Processing ${idx + 1}/${toCheck.length}: Verifying Download (${strategy.name})...` }));
 
                             try {
                                 const blobRes = await fetch('/api/download-pdf', {
@@ -423,9 +434,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
                                     });
                                 } else {
                                     // Download failed (404/403 etc)
-                                    console.warn(`Proxy download failed (${blobRes.status}) for ${directPdfUrl}. Retrying next model...`);
-                                    // Do NOT set finalSuccess = true.
-                                    // Loop continues to next model.
+                                    console.warn(`Proxy download failed (${blobRes.status}) for ${directPdfUrl}. Retrying next strategy...`);
                                 }
                             } catch (downloadErr) {
                                 console.warn(`Download error for ${directPdfUrl}`, downloadErr);
@@ -435,7 +444,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
                     }
 
                     if (!finalSuccess) {
-                        // FAILED to find valid PDF after all models
+                        // FAILED to find valid PDF after all strategies
                         const updatedArticle = { ...article, pdfStatus: 'failed' as const };
                         workingResults[originalIndex] = updatedArticle;
                         onArticleUpdate?.(updatedArticle);
