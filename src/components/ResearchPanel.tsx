@@ -884,8 +884,12 @@ Output only the keywords:`
                                             <span>DOI:</span>
                                             <span className="font-mono text-[10px] break-all">{article.doi || '-'}</span>
                                         </div>
-                                        {article.id.startsWith('gen-gemini') && (
+                                        {(article.id.startsWith('gen-gemini') || (article.sourceModel && article.sourceModel.includes('gemini'))) && (
                                             <div className="mt-2 text-[10px] bg-purple-100 text-purple-600 dark:bg-purple-900/30 px-1 py-0.5 rounded w-fit">Gemini Generated</div>
+                                        )}
+                                        {/* Scopus Badge */}
+                                        {(article.sourceModel === 'scopus' || article.id.startsWith('scopus') || article.id.startsWith('SCOPUS_ID') || article.source === 'Scopus') && (
+                                            <div className="mt-2 text-[10px] bg-sky-100 text-sky-700 dark:bg-sky-900/30 px-1 py-0.5 rounded w-fit">Scopus</div>
                                         )}
                                     </td>
                                     <td className="px-4 py-3 align-top w-[250px]">
