@@ -19,12 +19,19 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: `Failed to fetch PDF: ${response.statusText}` }, { status: response.status });
         }
 
+        const contentType = response.headers.get('content-type') || 'application/pdf';
+
+        // If it's clearly HTML, reject it
+        if (contentType.includes('text/html')) {
+            return NextResponse.json({ error: 'URL returned HTML, not PDF' }, { status: 400 });
+        }
+
         const arrayBuffer = await response.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
 
         return new NextResponse(buffer, {
             headers: {
-                'Content-Type': 'application/pdf',
+                'Content-Type': contentType,
                 'Content-Disposition': 'attachment; filename="document.pdf"'
             }
         });
