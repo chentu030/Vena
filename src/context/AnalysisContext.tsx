@@ -34,7 +34,7 @@ interface AnalysisState {
 interface AnalysisContextType {
     state: AnalysisState;
     startAnalysis: (articles: ResearchArticle[], projectId: string, groupId: string, userId: string) => void;
-    startCheckPdf: (articles: ResearchArticle[], projectId: string, groupId: string, userId: string, projectName: string, groupName: string, onArticleUpdate?: (article: ResearchArticle) => void) => void;
+    startCheckPdf: (articles: ResearchArticle[], projectId: string, groupId: string, userId: string, projectName: string, groupName: string, onArticleUpdate?: (article: ResearchArticle) => void, retryFailed?: boolean) => void;
     cancelAnalysis: () => void;
     toggleWidget: () => void;
     closeWidget: () => void;
