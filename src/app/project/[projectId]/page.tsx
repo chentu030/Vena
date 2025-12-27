@@ -1864,6 +1864,9 @@ export default function ProjectWorkspace() {
                             onSendMessage={handleSendMessage}
                             isLoading={isLoading}
                             loadingStatus={loadingStatus}
+                            researchGroups={researchGroups}
+                            currentGroupId={currentGroupId}
+                            articles={currentResearchResults}
                             onConfirmSearch={(config) => executeLiteratureSearch(config)}
                             onStopGeneration={handleStopGeneration}
                             onCancelSearch={(config, chatOnly) => {
