@@ -410,8 +410,23 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
                                                     parentId: groupFolderId
                                                 });
 
-                                                if (uploadRes.status === "success" && uploadRes.url) {
-                                                    const driveUrl = uploadRes.url;
+                                                if (uploadRes.status === "success") {
+                                                    // 優先使用 embedUrl（適合 iframe 預覽），或從 fileId 生成
+                                                    let driveUrl = '';
+                                                    if (uploadRes.embedUrl) {
+                                                        driveUrl = uploadRes.embedUrl;
+                                                    } else if (uploadRes.fileId) {
+                                                        driveUrl = `https://drive.google.com/file/d/${uploadRes.fileId}/preview`;
+                                                    } else if (uploadRes.url) {
+                                                        // 嘗試從 URL 提取 fileId
+                                                        const idMatch = uploadRes.url.match(/[?&]id=([^&]+)/) || uploadRes.url.match(/\/d\/([^/]+)/);
+                                                        if (idMatch) {
+                                                            driveUrl = `https://drive.google.com/file/d/${idMatch[1]}/preview`;
+                                                        } else {
+                                                            driveUrl = uploadRes.url;
+                                                        }
+                                                    }
+
                                                     // Success: Update Article
                                                     const updatedArticle = { ...article, pdfUrl: driveUrl, pdfStatus: 'success' as const };
                                                     workingResults[originalIndex] = updatedArticle;
