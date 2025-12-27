@@ -357,6 +357,9 @@ export default function ProjectWorkspace() {
 
             setLoadingStatus(`🔍 Searching: "${config.keywords}" (${config.scopusCount} Scopus [Offset: ${existingScopusCount}], ${config.geminiCount} Gemini)...`);
 
+            // Define queries for Gemini (currently just the main keyword)
+            const geminiQueries = [config.keywords];
+
             const [scopusResults, geminiResultsBatches] = await Promise.all([
                 fetchScopus(config.keywords, config.scopusCount, existingScopusCount),
                 Promise.all(geminiQueries.map(async (q, i) => {
