@@ -251,9 +251,9 @@ export default function ResearchPanel({ onClose, initialResults, onSave, groups 
                     }
 
                     // Update article with the Drive URL
-                    const newArticleState = prev => prev.map(a =>
+                    const newArticleState = (prev: ResearchArticle[]) => prev.map(a =>
                         a.id === articleId
-                            ? { ...a, pdfUrl: driveUrl, pdfStatus: 'success' }
+                            ? { ...a, pdfUrl: driveUrl, pdfStatus: 'success' as const }
                             : a
                     );
 
