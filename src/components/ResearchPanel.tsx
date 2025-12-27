@@ -7,6 +7,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import FileChatPanel from '@/components/FileChatPanel';
+import PdfViewer from '@/components/PdfViewer';
 import { TeamFile } from '@/lib/firestore';
 
 export interface ResearchGroup {
@@ -1046,90 +1047,24 @@ Output only the keywords:`
                                     </button>
                                 </div>
                             </div>
-                            <div className="flex-1 overflow-auto flex items-center justify-center bg-neutral-50 dark:bg-neutral-800/50 relative">
-                                {(() => {
-                                    // 從 URL 提取 Google Drive fileId
-                                    const getFileId = (url: string): string | null => {
-                                        if (!url) return null;
-                                        const fileMatch = url.match(/\/file\/d\/([^/]+)/) ||
-                                            url.match(/[?&]id=([^&]+)/) ||
-                                            url.match(/\/d\/([^/]+)/);
-                                        return fileMatch ? fileMatch[1] : null;
-                                    };
-
-                                    // 將任何 Google Drive URL 轉換為可嵌入的預覽格式
-                                    const getPdfEmbedUrl = (url: string): string => {
-                                        if (!url) return '';
-
-                                        // 如果已經是 /preview 格式，直接使用
-                                        if (url.includes('/preview')) {
-                                            return url;
-                                        }
-
-                                        const fileId = getFileId(url);
-                                        if (fileId) {
-                                            return `https://drive.google.com/file/d/${fileId}/preview`;
-                                        }
-
-                                        // 如果無法解析，使用 Google Docs Viewer 作為後備方案
-                                        return `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
-                                    };
-
-                                    // 獲取「在 Google Drive 中開啟」的連結
-                                    const getOpenInDriveUrl = (url: string): string => {
-                                        const fileId = getFileId(url);
-                                        if (fileId) {
-                                            return `https://drive.google.com/file/d/${fileId}/view`;
-                                        }
-                                        return url;
-                                    };
-
-                                    const embedUrl = getPdfEmbedUrl(previewArticle.pdfUrl!);
-                                    const openUrl = getOpenInDriveUrl(previewArticle.pdfUrl!);
-
-                                    return (
-                                        <div className="w-full h-full relative">
-                                            {/* PDF iframe */}
-                                            <iframe
-                                                src={embedUrl}
-                                                className="w-full h-full"
-                                                title={previewArticle.title}
-                                                allow="autoplay"
-                                            />
-
-                                            {/* 備用方案提示（固定在底部） */}
-                                            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
-                                                <div className="flex items-center justify-between text-white text-sm">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-xs text-white/70">
-                                                            📄 PDF 無法預覽？大檔案可能需要在 Google Drive 中開啟
-                                                        </span>
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <a
-                                                            href={openUrl}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
-                                                            className="px-3 py-1.5 bg-white text-neutral-900 rounded-lg text-xs font-medium hover:bg-neutral-100 transition-colors flex items-center gap-1.5"
-                                                        >
-                                                            <ExternalLink size={12} />
-                                                            在 Google Drive 開啟
-                                                        </a>
-                                                        <a
-                                                            href={previewArticle.pdfUrl}
-                                                            download
-                                                            target="_blank"
-                                                            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors flex items-center gap-1.5"
-                                                        >
-                                                            <Download size={12} />
-                                                            下載 PDF
-                                                        </a>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })()}
+                            <div className="flex-1 overflow-hidden">
+                                <PdfViewer
+                                    url={previewArticle.pdfUrl!}
+                                    title={previewArticle.title}
+                                    fallbackUrl={(() => {
+                                        // 生成 Google Drive 開啟連結
+                                        const getFileId = (url: string): string | null => {
+                                            const fileMatch = url.match(/\/file\/d\/([^/]+)/) ||
+                                                url.match(/[?&]id=([^&]+)/) ||
+                                                url.match(/\/d\/([^/]+)/);
+                                            return fileMatch ? fileMatch[1] : null;
+                                        };
+                                        const fileId = getFileId(previewArticle.pdfUrl!);
+                                        return fileId
+                                            ? `https://drive.google.com/file/d/${fileId}/view`
+                                            : previewArticle.pdfUrl!;
+                                    })()}
+                                />
                             </div>
                         </div>
 
