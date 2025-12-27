@@ -15,33 +15,40 @@ export default function HydrationOverlayFix() {
                         
                         const originalError = console.error;
                         
-                        console.error = function(...args) {
-                            // Convert all args to string for deep search
-                            const argsString = args.map(arg => {
-                                if (arg === null || arg === undefined) return '';
+                        // Helper to safely convert args to string
+                        const safeStringify = (arg) => {
+                            try {
                                 if (typeof arg === 'string') return arg;
-                                if (arg instanceof Error) return arg.message + ' ' + (arg.stack || '');
-                                try {
-                                    return JSON.stringify(arg, null, 0);
-                                } catch (e) {
-                                    return String(arg);
+                                if (typeof arg === 'object' && arg !== null) {
+                                    // Handle circular refs
+                                    const seen = new WeakSet();
+                                    return JSON.stringify(arg, (key, value) => {
+                                        if (typeof value === 'object' && value !== null) {
+                                            if (seen.has(value)) return '[Circular]';
+                                            seen.add(value);
+                                        }
+                                        return value;
+                                    });
                                 }
-                            }).join(' ');
-
-                            // Check if this involves bis_skin_checked (browser extension)
-                            if (argsString.includes('bis_skin_checked')) {
-                                return; // Suppress entirely
+                                return String(arg);
+                            } catch (e) {
+                                return '';
                             }
+                        };
 
-                            // Check if this is the generic "A tree hydrated..." message
-                            // These are almost always caused by browser extensions in production
-                            const isHydrationMismatch = argsString.includes('A tree hydrated but some attributes') ||
-                                                       argsString.includes("didn't match the client properties") ||
-                                                       argsString.includes('Hydration failed because');
+                        console.error = function(...args) {
+                            // Convert all args to a searchable string
+                            const allArgs = args.map(safeStringify).join(' ');
 
-                            // If it's a hydration mismatch and mentions hidden/div (extension injection spots)
-                            if (isHydrationMismatch && (argsString.includes('hidden=') || argsString.includes('<div'))) {
-                                return; // Suppress
+                            // Filter conditions
+                            if (
+                                allArgs.includes('bis_skin_checked') ||
+                                allArgs.includes('bis_skin_checked="1"') ||
+                                allArgs.includes('A tree hydrated but some attributes') ||
+                                allArgs.includes('hydration') && allArgs.includes('mismatch') ||
+                                allArgs.includes('Warning: Prop') && allArgs.includes('did not match')
+                            ) {
+                                return;
                             }
                             
                             originalError.apply(console, args);

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { ResizableImage } from './extensions/ResizableImage';
@@ -13,23 +13,49 @@ import jsPDF from 'jspdf';
 import { saveAs } from 'file-saver';
 import { CitationExtension } from './extensions/CitationExtension';
 import { MathExtension } from './extensions/MathExtension';
+import { MermaidExtension } from './extensions/MermaidExtension';
+import { CodeBlockComponent } from './extensions/CodeBlockComponent';
+import CodeBlockExtension from '@tiptap/extension-code-block';
+import { ReactNodeViewRenderer } from '@tiptap/react';
 
 interface MainEditorProps {
     content: string;
     setContent: (content: string) => void;
+    saveStatus?: 'saved' | 'saving' | 'error';
 }
 
-export default function MainEditor({ content, setContent }: MainEditorProps) {
+export default function MainEditor({ content, setContent, saveStatus = 'saved' }: MainEditorProps) {
     const [showMathToolbar, setShowMathToolbar] = useState(false);
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const editor = useEditor({
         extensions: [
-            StarterKit,
+            StarterKit.configure({
+                codeBlock: false, // Disable default CodeBlock to use our custom one
+            }),
+            // Custom Code Block with "Click to Render" support
+            CodeBlockExtension.extend({
+                addNodeView() {
+                    return ReactNodeViewRenderer(CodeBlockComponent);
+                }
+            }).configure({
+                defaultLanguage: 'plaintext',
+            }),
             Markdown.configure({
                 html: true,
                 transformPastedText: true,
                 transformCopiedText: true,
-            }),
+                extensions: [
+                    {
+                        name: 'citation',
+                        serialize(state: any, node: any) {
+                            state.write(`[${node.attrs.index}]`);
+                        },
+                        parse: {},
+                    },
+                    // Remove custom Mermaid serializer, let it fall back to default CodeBlock serializer
+                    // which handles ```mermaid correctly.
+                ],
+            } as any),
             ResizableImage,
             Link.configure({
                 openOnClick: false,
@@ -39,6 +65,7 @@ export default function MainEditor({ content, setContent }: MainEditorProps) {
             }),
             MathExtension,
             CitationExtension,
+            // MermaidExtension, // Disable the dedicated node extension for now
         ],
         content: content,
         editorProps: {
@@ -47,8 +74,10 @@ export default function MainEditor({ content, setContent }: MainEditorProps) {
             },
         },
         onUpdate: ({ editor }) => {
-            const htmlOutput = editor.getHTML();
-            setContent(htmlOutput);
+            // Use Markdown as source of truth to avoid HTML/MD mixing issues when appending AI content
+            const output = (editor.storage.markdown as any).getMarkdown();
+            console.log("Editor Update: Markdown output length", output.length);
+            setContent(output);
         },
         immediatelyRender: false,
     });
@@ -93,16 +122,183 @@ export default function MainEditor({ content, setContent }: MainEditorProps) {
         }
     }, [content, editor]);
 
-    // Better Sync Strategy for "Load":
-    // If the parent switches "active document", it should ideally remount this component or we need a way to know "new doc loaded".
-    // For now, I will assume `content` prop is the source of truth, but I wont auto-update deeply to prevent loops.
-    // I'll leave the useEffect commented out/simplified or handled via key in parent if needed.
-    // Actually, let's do this: if editor is empty and content is not, set it.
+    // Track the last content length we synced to detect appends
+    const lastSyncedLengthRef = useRef(0);
+    const pendingContentRef = useRef<string | null>(null);
+    const isSyncingRef = useRef(false);
+
+    // Function to sync content and run conversions
+    // Function to sync content and run conversions
+    const syncContentAndConvert = useCallback((contentToSync: string) => {
+        if (!editor) return;
+
+        // Set content
+        editor.commands.setContent(contentToSync);
+        lastSyncedLengthRef.current = contentToSync.length;
+
+        // Run conversions in a timeout to ensure editor state and DOM are fully updated
+        setTimeout(() => {
+            if (!editor) return;
+
+            // Convert citations
+            if (editor.schema.nodes.citation) {
+                const { state } = editor;
+                const textUpdates: { from: number; to: number; indices: string[] }[] = [];
+                const nodeUpdates: { from: number; to: number; indices: string[] }[] = [];
+
+                state.doc.descendants((node, pos) => {
+                    if (node.isText && node.text) {
+                        const regex = /\[([\d,\s]+)\]/g;
+                        let match;
+                        while ((match = regex.exec(node.text)) !== null) {
+                            const indices = match[1].split(/[,;]+/).map(s => s.trim()).filter(Boolean);
+                            if (indices.length > 0) {
+                                textUpdates.push({
+                                    from: pos + match.index,
+                                    to: pos + match.index + match[0].length,
+                                    indices
+                                });
+                            }
+                        }
+                    }
+
+                    if (node.type.name === 'citation') {
+                        const indexStr = String(node.attrs.index || '');
+                        if (indexStr.includes(',') || indexStr.includes(';')) {
+                            const indices = indexStr.split(/[,;]+/).map(s => s.trim()).filter(Boolean);
+                            if (indices.length > 1) {
+                                nodeUpdates.push({
+                                    from: pos,
+                                    to: pos + node.nodeSize,
+                                    indices
+                                });
+                            }
+                        }
+                    }
+                });
+
+                const allUpdates = [...textUpdates, ...nodeUpdates];
+                if (allUpdates.length > 0) {
+                    allUpdates.sort((a, b) => b.from - a.from);
+                    try {
+                        const { state: currentState } = editor;
+                        const tr = currentState.tr;
+
+                        for (const u of allUpdates) {
+                            const nodes = u.indices.map(idx =>
+                                editor.schema.nodes.citation.create({ index: idx })
+                            );
+                            tr.replaceWith(u.from, u.to, nodes);
+                        }
+                        editor.view.dispatch(tr);
+                    } catch (e) { console.error("Citation convert error", e); }
+                }
+            }
+
+            // Convert Mermaid blocks
+            // Re-fetch state after potential citation updates
+            const { state: mState } = editor;
+            const mermaidUpdates: { from: number; to: number; src: string }[] = [];
+
+            console.log("Scanning for mermaid blocks...");
+
+            mState.doc.descendants((node, pos) => {
+                // Debug log for all codeBlocks
+                if (node.type.name === 'codeBlock') {
+                    console.log("CodeBlock found:", node.attrs.language, node.textContent.slice(0, 20));
+                }
+
+                const isMermaidBlock = node.type.name === 'codeBlock' &&
+                    (node.attrs.language === 'mermaid' ||
+                        node.attrs.class?.includes('mermaid') ||
+                        node.textContent.trim().startsWith('flowchart') ||
+                        node.textContent.trim().startsWith('graph') ||
+                        node.textContent.trim().startsWith('sequenceDiagram') ||
+                        node.textContent.trim().startsWith('classDiagram'));
+
+                if (isMermaidBlock) {
+                    console.log("Identified Mermaid Block at", pos);
+                    mermaidUpdates.push({
+                        from: pos,
+                        to: pos + node.nodeSize,
+                        src: node.textContent
+                    });
+                }
+            });
+
+            /* 
+            // DISABLE MERMAID CONVERSION TEMPORARILY
+            // To prevent "disappearing content" bugs caused by sync race conditions.
+            if (mermaidUpdates.length > 0) {
+                console.log(`Applying ${mermaidUpdates.length} mermaid updates`);
+                const { state: currentState } = editor;
+                const tr = currentState.tr;
+                for (let i = mermaidUpdates.length - 1; i >= 0; i--) {
+                    const update = mermaidUpdates[i];
+                    try {
+                        const mermaidNode = editor.schema.nodes.mermaid.create({ src: update.src });
+                        tr.replaceWith(update.from, update.to, mermaidNode);
+                    } catch (e) {
+                        console.error("Failed to create mermaid node:", e);
+                    }
+                }
+                editor.view.dispatch(tr);
+            } else {
+                console.log("No mermaid blocks to convert found.");
+            }
+            */
+            console.log("Mermaid conversion disabled - rendering as code block.");
+        }, 50); // 50ms delay
+    }, [editor]);
+
+    // Unified content sync + conversion logic with queuing
     useEffect(() => {
-        if (editor && content && editor.isEmpty) {
-            editor.commands.setContent(content);
+        if (!editor || !content) return;
+
+        const contentLength = content.length;
+        const lastLength = lastSyncedLengthRef.current;
+
+        // Determine if we need to sync content
+        const needsSync = editor.isEmpty || (contentLength > lastLength + 20);
+
+        if (!needsSync) return;
+
+        // If currently syncing, queue this content for later
+        if (isSyncingRef.current) {
+            pendingContentRef.current = content;
+            return;
         }
-    }, [content, editor]);
+
+        isSyncingRef.current = true;
+
+        // Execute the sync using setTimeout to avoid flushSync errors
+        setTimeout(() => {
+            syncContentAndConvert(content);
+
+            // Check if there's pending content to process
+            const processPending = () => {
+                if (pendingContentRef.current && pendingContentRef.current.length > lastSyncedLengthRef.current + 20) {
+                    const pending = pendingContentRef.current;
+                    pendingContentRef.current = null;
+                    syncContentAndConvert(pending);
+                    // Check again in case more content came in
+                    queueMicrotask(processPending);
+                } else {
+                    pendingContentRef.current = null;
+                    isSyncingRef.current = false;
+                }
+            };
+
+            queueMicrotask(processPending);
+        }, 0);
+
+        return () => {
+            isSyncingRef.current = false;
+        };
+    }, [editor, content, syncContentAndConvert]);
+
+    // Note: Mermaid block conversion is handled in syncContentAndConvert
+    // No need for a separate update listener as it was causing focus issues
 
 
     if (!editor) {
@@ -246,6 +442,27 @@ export default function MainEditor({ content, setContent }: MainEditorProps) {
                     <button onClick={() => editor.chain().focus().redo().run()} disabled={!editor.can().redo()} className="p-2 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded disabled:opacity-30"><Redo size={14} /></button>
                     <div className="w-px h-6 bg-border mx-1" />
 
+                    {/* Save Status */}
+                    <div className="flex items-center gap-1.5 mr-2 px-2">
+                        {saveStatus === 'saving' && (
+                            <>
+                                <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                                <span className="text-xs text-muted-foreground hidden sm:inline">Saving...</span>
+                            </>
+                        )}
+                        {saveStatus === 'saved' && (
+                            <>
+                                <div className="w-2 h-2 rounded-full bg-green-500" />
+                                <span className="text-xs text-muted-foreground hidden sm:inline">Saved</span>
+                            </>
+                        )}
+                        {saveStatus === 'error' && (
+                            <>
+                                <div className="w-2 h-2 rounded-full bg-red-500" />
+                                <span className="text-xs text-red-500 font-bold hidden sm:inline">Save Failed</span>
+                            </>
+                        )}
+                    </div>
                     <button onClick={exportMD} className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded transition-colors whitespace-nowrap">
                         <FileText size={14} /> MD
                     </button>
@@ -259,26 +476,28 @@ export default function MainEditor({ content, setContent }: MainEditorProps) {
             </div>
 
             {/* Math / LaTeX Quick Toolbar */}
-            {showMathToolbar && (
-                <div className="h-10 border-b border-border/50 flex items-center px-4 bg-purple-50/50 dark:bg-purple-900/10 gap-2 overflow-x-auto scrollbar-hide text-xs animate-in slide-in-from-top-1">
-                    <span className="text-purple-600 dark:text-purple-400 font-medium mr-2 flex items-center gap-1"><Sigma size={12} /> Math:</span>
-                    <button onClick={() => editor.chain().focus().insertContent({ type: 'math', attrs: { latex: 'E=mc^2' } }).run()} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-mono" title="Inline Math">$...$</button>
-                    <button onClick={() => insertText('$$\n', '\n$$')} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-mono" title="Block Math">$$...$$</button>
-                    <div className="w-px h-4 bg-purple-200 dark:bg-purple-700/50 mx-1" />
-                    <button onClick={() => editor.chain().focus().insertContent({ type: 'math', attrs: { latex: '\\frac{a}{b}' } }).run()} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-serif italic" title="Fraction">Fraction</button>
-                    <button onClick={() => editor.chain().focus().insertContent({ type: 'math', attrs: { latex: '\\sqrt{x}' } }).run()} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-serif italic" title="Square Root">√</button>
-                    <button onClick={() => editor.chain().focus().insertContent({ type: 'math', attrs: { latex: '\\sum_{i=1}^{n}' } }).run()} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-serif" title="Sum">∑</button>
-                    <button onClick={() => editor.chain().focus().insertContent({ type: 'math', attrs: { latex: '\\int_{a}^{b}' } }).run()} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-serif italic" title="Integral">∫</button>
-                    <button onClick={() => editor.chain().focus().insertContent({ type: 'math', attrs: { latex: '\\alpha' } }).run()} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-serif italic">α</button>
-                    <button onClick={() => editor.chain().focus().insertContent({ type: 'math', attrs: { latex: '\\beta' } }).run()} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-serif italic">β</button>
-                    <button onClick={() => editor.chain().focus().insertContent({ type: 'math', attrs: { latex: '\\theta' } }).run()} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-serif italic">θ</button>
-                </div>
-            )}
+            {
+                showMathToolbar && (
+                    <div className="h-10 border-b border-border/50 flex items-center px-4 bg-purple-50/50 dark:bg-purple-900/10 gap-2 overflow-x-auto scrollbar-hide text-xs animate-in slide-in-from-top-1">
+                        <span className="text-purple-600 dark:text-purple-400 font-medium mr-2 flex items-center gap-1"><Sigma size={12} /> Math:</span>
+                        <button onClick={() => editor.chain().focus().insertContent({ type: 'math', attrs: { latex: 'E=mc^2' } }).run()} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-mono" title="Inline Math">$...$</button>
+                        <button onClick={() => insertText('$$\n', '\n$$')} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-mono" title="Block Math">$$...$$</button>
+                        <div className="w-px h-4 bg-purple-200 dark:bg-purple-700/50 mx-1" />
+                        <button onClick={() => editor.chain().focus().insertContent({ type: 'math', attrs: { latex: '\\frac{a}{b}' } }).run()} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-serif italic" title="Fraction">Fraction</button>
+                        <button onClick={() => editor.chain().focus().insertContent({ type: 'math', attrs: { latex: '\\sqrt{x}' } }).run()} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-serif italic" title="Square Root">√</button>
+                        <button onClick={() => editor.chain().focus().insertContent({ type: 'math', attrs: { latex: '\\sum_{i=1}^{n}' } }).run()} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-serif" title="Sum">∑</button>
+                        <button onClick={() => editor.chain().focus().insertContent({ type: 'math', attrs: { latex: '\\int_{a}^{b}' } }).run()} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-serif italic" title="Integral">∫</button>
+                        <button onClick={() => editor.chain().focus().insertContent({ type: 'math', attrs: { latex: '\\alpha' } }).run()} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-serif italic">α</button>
+                        <button onClick={() => editor.chain().focus().insertContent({ type: 'math', attrs: { latex: '\\beta' } }).run()} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-serif italic">β</button>
+                        <button onClick={() => editor.chain().focus().insertContent({ type: 'math', attrs: { latex: '\\theta' } }).run()} className="px-2 py-1 hover:bg-purple-100 dark:hover:bg-purple-800/30 rounded font-serif italic">θ</button>
+                    </div>
+                )
+            }
 
             {/* Editor Content with Scroll Area */}
             <div className="flex-1 overflow-y-auto bg-white dark:bg-neutral-950" onClick={() => editor.chain().focus().run()}>
                 <EditorContent editor={editor} className="h-full" />
             </div>
-        </div>
+        </div >
     );
 }

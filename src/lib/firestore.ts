@@ -31,74 +31,229 @@ const getCollectionPath = (userId: string, collectionName: CollectionName, proje
 };
 
 // Generic Save Function
+const sanitizeData = (data: any): any => {
+    // Relaxed limits - we rely on chunking for size management now
+    const MAX_STRING_LENGTH = 10000000; // 10MB
+    const MAX_DEPTH = 8;
+    const MAX_ARRAY_LENGTH = 5000;
+
+    const traverse = (obj: any, depth: number): any => {
+        if (depth > MAX_DEPTH) return '[Max Depth Exceeded]';
+
+        if (typeof obj === 'string') {
+            if (obj.length > MAX_STRING_LENGTH) {
+                console.warn(`Truncating huge string field (Length: ${obj.length})`);
+                return obj.substring(0, 500) + '...[Content Truncated - Too Large]';
+            }
+            return obj;
+        }
+
+        if (Array.isArray(obj)) {
+            if (obj.length > MAX_ARRAY_LENGTH) {
+                console.warn(`Truncating large array (Length: ${obj.length})`);
+                return obj.slice(0, MAX_ARRAY_LENGTH).map(item => traverse(item, depth + 1));
+            }
+            return obj.map(item => traverse(item, depth + 1));
+        }
+
+        if (obj && typeof obj === 'object') {
+            const newObj: any = {};
+            for (const key in obj) {
+                newObj[key] = traverse(obj[key], depth + 1);
+            }
+            return newObj;
+        }
+        return obj;
+    };
+
+    return traverse(data, 0);
+};
+
 export const saveDocument = async (userId: string, collectionName: CollectionName, data: any, projectId?: string) => {
     try {
         const path = getCollectionPath(userId, collectionName, projectId);
         const docRef = doc(db, path, data.id);
-        // Ensure date fields are strings or timestamps
+
+        // Sanitize data
+        const cleanData = sanitizeData(data);
         const payload = {
-            ...data,
+            ...cleanData,
             updatedAt: Timestamp.now(),
-            userId: userId // Optional redundancy
+            userId: userId
         };
-        await setDoc(docRef, payload, { merge: true });
-        console.log(`Saved to ${path}: ${data.id}`);
+
+        const jsonString = JSON.stringify(payload);
+        const payloadSize = jsonString.length;
+
+        if (payloadSize > 900000) {
+            console.log(`Document too large (${payloadSize} bytes) for ${collectionName}/${data.id}. Using chunked storage.`);
+
+            // Chunking Strategy
+            const CHUNK_SIZE = 500000;
+            const chunks = [];
+            for (let i = 0; i < payloadSize; i += CHUNK_SIZE) {
+                chunks.push(jsonString.substring(i, i + CHUNK_SIZE));
+            }
+
+            const batch = writeBatch(db);
+            const chunksRef = collection(db, path, data.id, 'chunks');
+
+            // Save chunks
+            chunks.forEach((chunkStr, index) => {
+                const chunkDoc = doc(chunksRef, index.toString());
+                batch.set(chunkDoc, { data: chunkStr, index });
+            });
+
+            // Save Manifest (exclude heavy content if possible, but for generic object we just omit content if we knew the field)
+            // For now, we save a lightweight manifest.
+            const { content, ...metaData } = payload; // Try to extract 'content' if it exists to keep manifest small
+            const manifest = {
+                ...metaData, // Persist metadata
+                chunked: true,
+                chunkCount: chunks.length,
+                totalSize: payloadSize,
+                updatedAt: Timestamp.now()
+            };
+
+            batch.set(docRef, manifest);
+            await batch.commit();
+            console.log(`Saved ${chunks.length} chunks for ${data.id}`);
+
+        } else {
+            // Normal Save
+            await setDoc(docRef, { ...payload, chunked: false }, { merge: true });
+            console.log(`Saved to ${path}: ${data.id}`);
+        }
     } catch (e) {
         console.error(`Error saving to ${collectionName}`, e);
-        throw e;
     }
 };
 
-// Generic Load Function
 export const loadCollection = async (userId: string, collectionName: CollectionName, projectId?: string) => {
     try {
         const path = getCollectionPath(userId, collectionName, projectId);
         const q = query(
             collection(db, path),
-            orderBy('updatedAt', 'desc') // Ensure indexing if needed, or sort on client
+            orderBy('updatedAt', 'desc')
         );
         const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+
+        // Process results - handle chunked documents
+        const results = await Promise.all(snapshot.docs.map(async (docSnap) => {
+            const data = docSnap.data();
+
+            if (data.chunked && data.chunkCount > 0) {
+                try {
+                    // Load chunks
+                    const chunksRef = collection(db, path, docSnap.id, 'chunks');
+                    const chunkQ = query(chunksRef, orderBy('index', 'asc'));
+                    const chunkSnaps = await getDocs(chunkQ);
+
+                    let fullJson = '';
+                    chunkSnaps.forEach(c => fullJson += c.data().data);
+
+                    if (fullJson) {
+                        const parsed = JSON.parse(fullJson);
+                        return { ...parsed, id: docSnap.id };
+                    }
+                } catch (err) {
+                    console.error(`Failed to load chunks for ${docSnap.id}`, err);
+                    // Return manifest as fallback (incomplete data is better than crash)
+                    return { ...data, id: docSnap.id, error: 'Load Failed' };
+                }
+            }
+            return { ...data, id: docSnap.id };
+        }));
+
+        return results;
     } catch (e) {
         console.error(`Error loading ${collectionName}`, e);
-        // Fallback to empty array if index missing or error
         return [];
     }
 };
 
-// Generic Delete Function
 export const deleteDocument = async (userId: string, collectionName: CollectionName, docId: string, projectId?: string) => {
     try {
         const path = getCollectionPath(userId, collectionName, projectId);
-        await deleteDoc(doc(db, path, docId));
+
+        // 1. Delete chunks subcollection if exists (Generic approach: list and delete)
+        // Note: Client SDK can't delete collection directly, must delete docs.
+        const chunksRef = collection(db, path, docId, 'chunks');
+        const chunkSnaps = await getDocs(chunksRef);
+
+        const batch = writeBatch(db);
+        chunkSnaps.forEach(c => batch.delete(c.ref));
+
+        // 2. Delete main doc
+        const docRef = doc(db, path, docId);
+        batch.delete(docRef);
+
+        await batch.commit();
     } catch (e) {
         console.error(`Error deleting from ${collectionName}`, e);
         throw e;
     }
 };
 
-// Save single project-level data (Map, Chat)
+// Save single project-level data (Map, Chat) - WITH CHUNKING
 export const saveProjectData = async (userId: string, key: string, data: any, projectId?: string) => {
     try {
-        // Project Level Data like 'currentMap' or 'currentChat'
-        // If projectId is provided, store it in the project document itself or a subcollection?
-        // Let's store it as a special doc in the project's 'settings' or 'data' subcollection to keep it clean,
-        // OR just simple: users/{uid}/projects/{pid}/data/{key}
-
         let path = `users/${userId}/project`;
         if (projectId) {
             path = `users/${userId}/projects/${projectId}/data`;
         }
-
         const docRef = doc(db, path, key);
-        await setDoc(docRef, { ...data, updatedAt: Timestamp.now() }, { merge: true });
-        console.log(`Saved project data: ${key} at ${path}`);
+
+        // Sanitize (basic checks)
+        const cleanData = sanitizeData(data);
+        const payload = { ...cleanData, updatedAt: Timestamp.now() };
+
+        // Check Size
+        const jsonString = JSON.stringify(payload);
+        const totalSize = jsonString.length;
+
+        if (totalSize > 900000) { // > 900KB -> Chunk it
+            console.log(`Payload large (${totalSize} bytes), using chunked storage for ${key}...`);
+
+            // 1. Split into chunks
+            const CHUNK_SIZE = 500000; // 500KB safe margin
+            const chunks = [];
+            for (let i = 0; i < totalSize; i += CHUNK_SIZE) {
+                chunks.push(jsonString.substring(i, i + CHUNK_SIZE));
+            }
+
+            // 2. Save Chunks to Subcollection
+            const batch = writeBatch(db);
+            const chunksRef = collection(db, path, key, 'chunks');
+
+            chunks.forEach((chunkStr, index) => {
+                const chunkDoc = doc(chunksRef, index.toString());
+                batch.set(chunkDoc, { data: chunkStr, index });
+            });
+
+            // 3. Save Manifest
+            batch.set(docRef, {
+                chunked: true,
+                chunkCount: chunks.length,
+                totalSize,
+                updatedAt: Timestamp.now()
+            });
+
+            await batch.commit();
+            console.log(`Saved ${chunks.length} chunks for ${key}`);
+
+        } else {
+            // Small enough data - save normally
+            await setDoc(docRef, { ...payload, chunked: false }, { merge: true });
+            console.log(`Saved project data: ${key} at ${path}`);
+        }
+
     } catch (e) {
         console.error(`Error saving project data ${key}`, e);
     }
 };
 
-// Load single project-level data
+// Load single project-level data - WITH CHUNK SUPPORT
 export const loadProjectData = async (userId: string, key: string, projectId?: string) => {
     try {
         let path = `users/${userId}/project`;
@@ -108,8 +263,34 @@ export const loadProjectData = async (userId: string, key: string, projectId?: s
 
         const docRef = doc(db, path, key);
         const snapshot = await getDoc(docRef);
+
         if (snapshot.exists()) {
-            return snapshot.data();
+            const data = snapshot.data();
+
+            // Check if chunked
+            if (data.chunked && data.chunkCount > 0) {
+                console.log(`Detected chunked data for ${key}, loading ${data.chunkCount} segments...`);
+                // Load chunks
+                const chunksRef = collection(db, path, key, 'chunks');
+                const q = query(chunksRef, orderBy('index', 'asc')); // Ensure order
+                const chunkSnaps = await getDocs(q);
+
+                let fullJson = '';
+                chunkSnaps.forEach(snap => {
+                    fullJson += snap.data().data;
+                });
+
+                if (fullJson) {
+                    try {
+                        return JSON.parse(fullJson);
+                    } catch (parseError) {
+                        console.error("Failed to parse chunked JSON", parseError);
+                        return null;
+                    }
+                }
+            }
+
+            return data;
         }
         return null;
     } catch (e) {
@@ -117,6 +298,7 @@ export const loadProjectData = async (userId: string, key: string, projectId?: s
         return null;
     }
 };
+
 
 // --- Project Management Functions ---
 

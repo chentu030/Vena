@@ -12,6 +12,7 @@ import SystemMapPanel from '@/components/SystemMapPanel';
 import HistorySidebar from '@/components/HistorySidebar';
 import MainEditor from '@/components/MainEditor';
 import ResearchPanel from '@/components/ResearchPanel';
+import { PaperProvider } from '@/context/PaperContext';
 import { useAuth } from '@/lib/auth';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { useTheme } from 'next-themes';
@@ -95,6 +96,7 @@ export default function ProjectWorkspace() {
 
     // Sidebar State: 'none' | 'draft' | 'map' | 'main' | 'research'
     const [sidebarView, setSidebarView] = useState<'none' | 'draft' | 'map' | 'main' | 'research'>('none');
+    const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
 
     // Resizable sidebar width (percentage)
     const [sidebarWidth, setSidebarWidth] = useState(45);
@@ -183,6 +185,12 @@ export default function ProjectWorkspace() {
     // Auto-save Main Content (Manuscript)
     const lastSaveRef = useRef<number>(Date.now());
     const isFirstLoadRef = useRef(true);
+    const savedManuscriptsRef = useRef(savedManuscripts);
+
+    // Sync ref
+    useEffect(() => {
+        savedManuscriptsRef.current = savedManuscripts;
+    }, [savedManuscripts]);
 
     useEffect(() => {
         if (!user || !projectId || !mainContent) return;
@@ -555,99 +563,231 @@ export default function ProjectWorkspace() {
                     return;
                 }
 
-                // Check for Manuscript Generation Request
-                if (text.includes("撰寫研究方法與理論架構文章") || text.includes("Draft Research Methods") || text.includes("Research Methods")) {
-                    newMessages.push({ role: 'system', content: `📝 Drafting Research Methods & Theory article with Gemini 3.0 Pro...` });
+                // Check for Manuscript Generation Request (Full Proposal or Methods)
+                if (text.includes("撰寫研究方法與理論架構文章") || text.includes("Draft Research Methods") || text.includes("Research Methods") || text.includes("撰寫研究計畫書") || text.includes("Draft Research Proposal")) {
+
+                    const isFullProposal = text.includes("撰寫研究計畫書") || text.includes("Draft Research Proposal") || text.includes("撰寫研究方法與理論架構文章");
+                    const statusText = isFullProposal ? "Drafting Full Research Proposal..." : "Drafting Research Methods & Theory article...";
+
+                    newMessages.push({ role: 'system', content: `📝 ${statusText} with Gemini 3.0 Pro...` });
                     setMessages([...newMessages]);
 
-                    const papersText = targetPapers.map((p: any, i) => `[ID:${i + 1}] ${p.title}\nAbstract: ${p.abstract}\nMethodology: ${p.methodology || 'N/A'}`).join('\n\n');
+                    // Import dynamically or use what's available
+                    const { RESEARCH_PROPOSAL_STRUCTURE, generateSectionPrompt, generateMermaidPrompt } = await import('@/lib/manuscriptPrompts');
 
-                    const prompt = `Based on the following ${targetPapers.length} research papers, please write a comprehensive academic article section focusing on "Research Methods, Theoretical Framework, and Theoretical Models".
-                    Papers:
-                    ${papersText}
-                    Requirements:
-                    1. Language: Traditional Chinese (繁體中文).
-                    2. Structure (organize logically):
-                       - Introduction to the Research Approach (研究取徑)
-                       - Theoretical Framework (理論架構)
-                       - Theoretical Models (理論模型)
-                       - Research Methods detail (研究方法細節)
-                       - Synthesis/Conclusion (綜整)
-                    3. The content must be highly detailed, professional, and synthesized. Do not just list the papers one by one; synthesize their commonalities and differences.
-                    4. Cite sources using the format [ID] or (Author, Year).
-                    5. Format as clean Markdown (headings, lists, bold text).
-                    User specific instruction: "${text}"
-                    `;
+                    // If it's just "Research Methods", we might want to just run the methodology section or the old prompt?
+                    // User asked to "redesign prompts" based on the file. Let's strictly use the new multi-step approach for "Research Proposal".
+                    // If it's the old strict "Methods" request, we can perhaps map it to the 'methodology' section of the new structure.
 
-                    try {
-                        const res = await fetch('/api/gemini', {
-                            method: 'POST',
-                            body: JSON.stringify({
-                                model: 'gemini-3-pro-preview', // Explicitly requested by user
-                                task: 'summary',
-                                prompt: prompt,
-                                history: []
-                            })
-                        });
+                    let sectionsToGenerate = RESEARCH_PROPOSAL_STRUCTURE;
+                    if (!isFullProposal) {
+                        // If only methods requested, just do methodology section
+                        sectionsToGenerate = RESEARCH_PROPOSAL_STRUCTURE.filter(s => s.id === 'methodology');
+                    }
 
-                        if (!res.ok) throw new Error("Gemini API failed");
+                    // Loop through sections sequentially
+                    let fullGeneratedContent = "";
+                    let methodologyContent = ""; // Store methodology content for Mermaid generation
 
-                        const data = await res.json();
-                        let articleContent = data.text || '';
+                    for (const section of sectionsToGenerate) {
+                        setLoadingStatus(`Drafting: ${section.title}...`);
 
-                        if (!articleContent && data.error) throw new Error(data.details || data.error);
+                        const prompt = generateSectionPrompt(section.id, projectDetails?.name || "Target Topic", targetPapers, section.sectionNumber);
 
-                        // Process citations: Convert [ID:X] to <citation> tags
-                        articleContent = articleContent.replace(/\[ID:(\d+)\]/g, (match: string, idStr: string) => {
-                            const idx = parseInt(idStr) - 1;
-                            if (idx >= 0 && idx < targetPapers.length) {
-                                const p = targetPapers[idx];
-                                const safeTitle = (p.title || '').replace(/"/g, '&quot;');
-                                const doi = p.doi || '';
-                                return `<citation index="${idStr}" title="${safeTitle}" doi="${doi}"></citation>`;
+                        // Retry logic for section generation
+                        const MAX_RETRIES = 3;
+                        let sectionContent = '';
+                        let sectionSuccess = false;
+
+                        for (let attempt = 1; attempt <= MAX_RETRIES && !sectionSuccess; attempt++) {
+                            try {
+                                if (attempt > 1) {
+                                    setLoadingStatus(`Retrying ${section.title} (Attempt ${attempt}/${MAX_RETRIES})...`);
+                                }
+
+                                const res = await fetch('/api/gemini', {
+                                    method: 'POST',
+                                    body: JSON.stringify({
+                                        model: 'gemini-3-pro-preview',
+                                        task: 'summary',
+                                        prompt: prompt,
+                                        history: []
+                                    })
+                                });
+
+                                if (!res.ok) throw new Error("Gemini API failed");
+
+                                const data = await res.json();
+                                sectionContent = data.text || '';
+
+                                if (!sectionContent || sectionContent.length < 100) {
+                                    throw new Error("Response too short or empty");
+                                }
+
+                                if (data.error) throw new Error(data.details || data.error);
+
+                                sectionSuccess = true;
+                            } catch (err) {
+                                console.error(`Attempt ${attempt} failed for section ${section.id}:`, err);
+                                if (attempt === MAX_RETRIES) {
+                                    setMessages(prev => [...prev, { role: 'model', content: `⚠️ Failed to generate section after ${MAX_RETRIES} attempts: ${section.title}` }]);
+                                }
                             }
-                            return match;
-                        });
+                        }
 
-                        // Append to Main Content (Manuscript)
-                        const currentContent = mainContent || '';
-                        const divider = currentContent ? "\n\n---\n\n" : "";
-                        const newContent = currentContent + divider + "# 整理：研究方法與理論架構\n\n" + articleContent;
+                        if (!sectionSuccess) continue; // Skip to next section if all retries failed
 
-                        setMainContent(newContent);
+                        // Normalize citations: [ID:1, 2] -> [1, 2]
+                        sectionContent = sectionContent.replace(/\\\[ID:([\d\s,]+)\\\]/g, '[ID:$1]');
+                        sectionContent = sectionContent.replace(/\[ID:([\d\s,]+)\]/g, '[$1]');
+                        sectionContent = sectionContent.replace(/\[ID:\s*(\d+)\]/g, '[$1]');
 
+                        // Store methodology content for Mermaid generation
+                        if (section.id === 'methodology') {
+                            methodologyContent = sectionContent;
+                        }
+
+                        // Append this section to the main content state progressively
+                        const divider = (fullGeneratedContent || mainContent) ? "\n\n---\n\n" : "";
+                        const newSectionBlock = `${divider}# ${section.title}\n\n${sectionContent}`;
+
+                        // Update local variable
+                        fullGeneratedContent += newSectionBlock;
+
+                        // Update Editor State immediately so user sees progress
+                        setMainContent(prev => (prev || '') + newSectionBlock);
+
+                        // If this was the methodology section, generate a dedicated Mermaid diagram with retry
+                        if (section.id === 'methodology' && methodologyContent) {
+                            setLoadingStatus(`Designing Research Framework Diagram...`);
+
+                            let mermaidSuccess = false;
+
+                            for (let mermaidAttempt = 1; mermaidAttempt <= MAX_RETRIES && !mermaidSuccess; mermaidAttempt++) {
+                                try {
+                                    if (mermaidAttempt > 1) {
+                                        setLoadingStatus(`Retrying Mermaid diagram (Attempt ${mermaidAttempt}/${MAX_RETRIES})...`);
+                                    }
+
+                                    const mermaidPrompt = generateMermaidPrompt(projectDetails?.name || "Target Topic", methodologyContent);
+                                    const mermaidRes = await fetch('/api/gemini', {
+                                        method: 'POST',
+                                        body: JSON.stringify({
+                                            model: 'gemini-3-flash-preview',
+                                            task: 'summary',
+                                            prompt: mermaidPrompt,
+                                            history: []
+                                        })
+                                    });
+
+                                    if (!mermaidRes.ok) throw new Error("Mermaid API failed");
+
+                                    const mermaidData = await mermaidRes.json();
+                                    let mermaidCode = mermaidData.text || '';
+
+                                    console.log(`Mermaid attempt ${mermaidAttempt}:`, mermaidCode);
+
+                                    // Try to extract mermaid block
+                                    const mermaidMatch = mermaidCode.match(/```mermaid[\s\S]*?```/);
+                                    if (mermaidMatch) {
+                                        mermaidCode = mermaidMatch[0];
+                                    } else {
+                                        // Fallback: wrap raw mermaid code
+                                        const mermaidKeywords = /^(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|mindmap)/m;
+                                        if (mermaidKeywords.test(mermaidCode)) {
+                                            mermaidCode = `\`\`\`mermaid\n${mermaidCode.trim()}\n\`\`\``;
+                                        }
+                                    }
+
+                                    // Ensure newline after ```mermaid to prevent parsing issues
+                                    // Sometimes AI generates ```mermaid graph TD without newline
+                                    if (mermaidCode.includes('```mermaid')) {
+                                        mermaidCode = mermaidCode.replace(/```mermaid\s*([a-z]+)/i, '```mermaid\n$1');
+                                    }
+
+                                    // Validate and add
+                                    const isValidMermaid = mermaidCode.includes('```mermaid') && mermaidCode.length > 30;
+
+                                    if (isValidMermaid) {
+                                        const mermaidBlock = `\n\n### 研究架構圖 (Research Framework)\n\n${mermaidCode}\n`;
+                                        fullGeneratedContent += mermaidBlock;
+                                        setMainContent(prev => (prev || '') + mermaidBlock);
+                                        console.log("Mermaid block added successfully");
+                                        mermaidSuccess = true;
+                                    } else {
+                                        console.warn("Invalid Mermaid content detail:", mermaidCode);
+
+                                        // Still try to add it if it looks somewhat like code, but add a warning
+                                        if (mermaidCode.length > 20) {
+                                            const rawBlock = `\n\n### 研究架構圖 (Research Framework)\n\n> System Warning: Mermaid Diagram generation was imperfect.\n\n\`\`\`mermaid\n${mermaidCode.replace(/```/g, '')}\n\`\`\`\n`;
+                                            fullGeneratedContent += rawBlock;
+                                            setMainContent(prev => (prev || '') + rawBlock);
+                                            mermaidSuccess = true; // Mark as success so we don't retry unnecessarily if model is just confused
+                                        } else {
+                                            throw new Error("Invalid Mermaid content (too short or missing tags)");
+                                        }
+                                    }
+                                } catch (mermaidErr) {
+                                    console.error(`Mermaid attempt ${mermaidAttempt} failed:`, mermaidErr);
+                                    if (mermaidAttempt === MAX_RETRIES) {
+                                        console.warn("Failed to generate Mermaid diagram after all retries");
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Final Save
+                    if (fullGeneratedContent) {
                         // Save to Firebase
                         const docId = currentManuscriptId || `manuscript_${Date.now()}`;
                         const title = currentManuscriptId
                             ? savedManuscripts.find(m => m.id === currentManuscriptId)?.title
-                            : `Literature Review ${new Date().toLocaleDateString()}`;
+                            : `Research Proposal Draft ${new Date().toLocaleDateString()}`;
+
+                        const finalContent = (currentManuscriptId ? (mainContent || '') : '') + fullGeneratedContent;
+
+                        // If appending to existing, make sure we use the right base. 
+                        // Actually, setMainContent was appending locally. Let's trust fullGeneratedContent as the *new* part.
+                        // But if we are editing an EXISTING manuscript, we need to append to its *previous* content?
+                        // The loop above did: setMainContent(prev => (prev || '') + newSectionBlock);
+                        // So 'mainContent' state is already updated progressively.
+                        // However, 'fullGeneratedContent' only contains the NEW text.
+                        // For the SAVE, we should probably grab the latest state or just append.
+                        // Safest is to read the LATEST 'mainContent' state, but state updates might be async.
+                        // So let's rely on constructing it manually:
+                        // If new doc: finalContent = fullGeneratedContent
+                        // If existing doc: finalContent = (prevContent) + fullGeneratedContent. 
+                        // Wait, 'mainContent' in this scope is the value at START of render. It's stale!
+
+                        // Fix: We need to use a Ref or just assume we rely on 'fullGeneratedContent' combined with what we knew at start.
+                        // 'mainContent' is from scope.
+                        const contentToSave = (mainContent || '') + fullGeneratedContent;
 
                         await saveDocument(user!.uid, 'manuscripts', {
                             id: docId,
-                            title: title || 'Untitled Manuscript',
-                            content: newContent,
+                            title: title || 'Untitled Proposal',
+                            content: contentToSave,
                             updatedAt: new Date().toISOString()
                         }, projectId);
 
                         // If it was a new manuscript, update state
                         if (!currentManuscriptId) {
                             setCurrentManuscriptId(docId);
-                            // Reload to sync sidebar
                             const manuscripts = await loadCollection(user!.uid, 'manuscripts', projectId);
                             setSavedManuscripts(manuscripts);
                         }
 
-                        setSidebarView('main');
-                        setMessages(prev => [...prev, { role: 'model', content: "✅ 已將「研究方法與理論架構」文章撰寫完成並追加至 Manuscript！" }]);
+                        setMainContent(contentToSave); // Ensure consistent
+                        setSidebarView('main'); // Switch to editor view
 
-                    } catch (e) {
-                        console.error("Drafting failed", e);
-                        setMessages(prev => [...prev, { role: 'model', content: "❌ 撰寫失敗，請稍後再試。" }]);
+                        setMessages(prev => [...prev, { role: 'model', content: `✅ Research Proposal Drafted (${isFullProposal ? 'Full' : 'Methods Only'}). Check the Manuscript Editor.` }]);
                     }
 
                     setIsLoading(false);
-                    return; // Stop here, do not proceed to Mind Map generation
+                    return;
                 }
+
 
                 newMessages.push({ role: 'system', content: `⚡ Starting 2-Phase Mind Map Generation for ${targetPapers.length} papers...` });
                 setMessages([...newMessages]);
@@ -1380,6 +1520,68 @@ export default function ProjectWorkspace() {
         return () => clearTimeout(timer);
     }, [paperContent, currentDraftId, savedDrafts, user, projectId]);
 
+    // Auto-Save Manuscript
+    useEffect(() => {
+        // Guard: Need user and project. 
+        if (!user || !projectId) return;
+        // Guard: If it's a NEW manuscript (no ID) and empty, don't save yet.
+        // But if it HAS an ID, we must save even if empty (user deleted text).
+        if (!currentManuscriptId && (!mainContent || !mainContent.trim())) return;
+
+        setSaveStatus('saving');
+
+        const timer = setTimeout(async () => {
+            const now = new Date();
+            const newId = currentManuscriptId || `manuscript_${now.getTime()}`;
+
+            // Check if we need to generate a title
+            let title = '';
+            const existing = savedManuscriptsRef.current.find(m => m.id === newId);
+
+            if (existing) {
+                title = existing.title;
+            } else {
+                title = `Manuscript ${now.toLocaleDateString()}`;
+                if (mainContent && mainContent.length > 5) {
+                    const firstLine = mainContent.split('\n').find(l => l.trim().length > 0) || '';
+                    if (firstLine) title = firstLine.replace(/[#*]/g, '').trim().substring(0, 20);
+                }
+            }
+
+            setSavedManuscripts(prev => {
+                const docData = {
+                    id: newId,
+                    title,
+                    content: mainContent || '', // Ensure empty string if null
+                    updatedAt: new Date().toISOString()
+                };
+
+                const others = prev.filter(m => m.id !== newId);
+                const updated = [docData, ...others];
+
+                if (!isReadOnly && targetUserId) {
+                    saveDocument(targetUserId, 'manuscripts', docData, projectId)
+                        .then(() => {
+                            console.log(`Saved manuscript ${newId}`);
+                            setSaveStatus('saved');
+                        })
+                        .catch(err => {
+                            console.error("Failed to save manuscript", err);
+                            setSaveStatus('error');
+                        });
+                } else {
+                    setSaveStatus('saved');
+                }
+
+                if (!currentManuscriptId) setCurrentManuscriptId(newId);
+
+                return updated;
+            });
+        }, 800); // Reduced debounce for safer saving
+
+        return () => clearTimeout(timer);
+    }, [mainContent, currentManuscriptId, user, projectId]);
+
     // Rename Handler
     const handleRename = async (collectionType: 'draft' | 'map' | 'chat' | 'manuscript' | 'research', id: string, newTitle: string) => {
         if (!user || !projectId) return;
@@ -1585,10 +1787,22 @@ export default function ProjectWorkspace() {
         }
     };
 
+    // Citation Normalizer Helper
+    const normalizeCitations = (content: string) => {
+        if (!content) return content;
+        // 1. Unescape escaped brackets if present: \[ID:1\] -> [ID:1]
+        let processed = content.replace(/\\\[ID:([\d\s,]+)\\\]/g, '[ID:$1]');
+        // 2. Convert [ID:x, y] -> [x, y]
+        processed = processed.replace(/\[ID:([\d\s,]+)\]/g, '[$1]');
+        return processed;
+    };
+
     const onLoadManuscript = (id: any) => {
         const m = savedManuscripts.find(d => d.id === id);
         if (m) {
-            setMainContent(m.content);
+            // Apply normalization on load
+            const cleanContent = normalizeCitations(m.content);
+            setMainContent(cleanContent);
             setCurrentManuscriptId(m.id);
             setSidebarView('main');
             setHistoryOpen(false);
@@ -1951,10 +2165,13 @@ export default function ProjectWorkspace() {
                 )}
 
                 {sidebarView === 'main' && (
-                    <MainEditor
-                        content={mainContent}
-                        setContent={setMainContent}
-                    />
+                    <PaperProvider value={{ papers: researchGroups.flatMap(g => g.papers || []) }}>
+                        <MainEditor
+                            content={mainContent}
+                            setContent={setMainContent}
+                            saveStatus={saveStatus}
+                        />
+                    </PaperProvider>
                 )}
 
                 {sidebarView === 'research' && (

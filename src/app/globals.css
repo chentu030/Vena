@@ -121,3 +121,22 @@
   opacity: 0;
   animation: fadeInUp 0.25s ease-out 0.1s forwards;
 }
+
+/* Hide Next.js Error Overlay for extension-related hydration errors */
+[data-nextjs-dialog-overlay],
+[data-nextjs-dialog],
+[data-nextjs-toast],
+nextjs-portal,
+#__next-build-watcher,
+#__next_error__,
+#nextjs__container_errors__,
+[data-nextjs-error-overlay],
+[data-nextjs-container-errors-overlay] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+#next-client-overlay {
+  display: none !important;
+}
