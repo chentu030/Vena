@@ -27,6 +27,7 @@ interface SearchConfig {
     queries?: string[];
     originalMessage: string;
     dateRange?: { start: number; end: number };
+    languages?: string[];  // 新增：選擇的搜索語言
 }
 
 export default function ProjectWorkspace() {
@@ -244,29 +245,30 @@ export default function ProjectWorkspace() {
 
         setSidebarView('research'); // Switch to research tab
 
-        const newMessages = [...messages, { role: 'system', content: `🔍 Starting literature search for: "${config.keywords}" (${config.scopusCount} Scopus, ${config.geminiCount} Gemini)...` }];
+        // 語言配置映射
+        const LANGUAGE_MAP: Record<string, { name: string; translateName: string }> = {
+            'en': { name: 'English', translateName: 'English' },
+            'zh-TW': { name: '繁體中文', translateName: 'Traditional Chinese' },
+            'zh-CN': { name: '简体中文', translateName: 'Simplified Chinese' },
+            'ja': { name: '日本語', translateName: 'Japanese' },
+            'ko': { name: '한국어', translateName: 'Korean' },
+            'de': { name: 'German', translateName: 'German' },
+            'fr': { name: 'French', translateName: 'French' },
+            'es': { name: 'Spanish', translateName: 'Spanish' },
+            'pt': { name: 'Portuguese', translateName: 'Portuguese' },
+            'ru': { name: 'Russian', translateName: 'Russian' },
+        };
+
+        const selectedLanguages = config.languages || ['en'];
+        const languageNames = selectedLanguages.map(id => LANGUAGE_MAP[id]?.name || id).join(', ');
+
+        const newMessages = [...messages, { role: 'system', content: `🔍 Starting multi-language literature search for: "${config.keywords}" in ${languageNames} (${config.scopusCount} Scopus, ${config.geminiCount} Gemini)...` }];
         setMessages(newMessages);
 
         // Start Abort Controller
         if (abortControllerRef.current) abortControllerRef.current.abort();
         abortControllerRef.current = new AbortController();
         const signal = abortControllerRef.current.signal;
-
-        // Reference to ResearchPanel to trigger search
-        // Since ResearchPanel manages its own search state, we might need a way to pass this
-        // Ideally, ResearchPanel should expose a ref or we pass "initialQuery" prop but that's for mount
-        // For now, we'll simulate the search logic here OR better:
-        // We set a "triggerSearch" state that ResearchPanel listens to? 
-        // Or we just update the research results directly here if we move the fetch logic up?
-        // Given the existing architecture where ResearchPanel is self-contained, 
-        // we might re-use the Logic inside ResearchPanel. 
-        // BUT Refactoring ResearchPanel to accept a "trigger" prop is cleaner.
-
-        // However, to avoid Touching ResearchPanel again deeply, we can do the fetch HERE 
-        // and pass results to ResearchPanel via `activeNodeChats` or a new prop `externalResults`.
-        // WAIT: implementation_plan said "call executeLiteratureSearch... logic that calls Scopus/Gemini".
-        // The original code fetchScopus was INSIDE handleSendMessage.
-        // So I should move that logic HERE.
 
         try {
             // Helper: Generate PDF link
@@ -275,8 +277,64 @@ export default function ProjectWorkspace() {
                 return `https://scholar.google.com/scholar?q=${encodeURIComponent(title)}`;
             };
 
+            // 翻譯關鍵詞函數
+            const translateKeywords = async (keywords: string, targetLanguages: string[]): Promise<Record<string, string>> => {
+                // 如果只有英文，直接返回
+                if (targetLanguages.length === 1 && targetLanguages[0] === 'en') {
+                    return { 'en': keywords };
+                }
+
+                setLoadingStatus(`🌐 Translating keywords to ${targetLanguages.length} languages...`);
+
+                const translationPrompt = `Translate the following academic search keywords into multiple languages.
+Keywords: "${keywords}"
+
+Target languages: ${targetLanguages.map(id => LANGUAGE_MAP[id]?.translateName || id).join(', ')}
+
+Return ONLY a valid JSON object in this format:
+{
+  ${targetLanguages.map(id => `"${id}": "translated keywords"`).join(',\n  ')}
+}
+
+Rules:
+- Keep academic/technical terms in their appropriate form for each language
+- For CJK languages (Chinese, Japanese, Korean), use native academic terminology
+- Do NOT add explanations, just the JSON
+- Make keywords search-friendly for academic databases`;
+
+                try {
+                    const res = await fetch('/api/gemini', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            model: 'gemini-2.0-flash',
+                            task: 'summary',
+                            prompt: translationPrompt,
+                            history: []
+                        }),
+                        signal
+                    });
+
+                    const data = await res.json();
+                    if (!data.text) {
+                        console.warn('Translation failed, using original keywords');
+                        return targetLanguages.reduce((acc, lang) => ({ ...acc, [lang]: keywords }), {});
+                    }
+
+                    let jsonStr = data.text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+                    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) jsonStr = jsonMatch[0];
+
+                    const translations = JSON.parse(jsonStr);
+                    console.log('Translated keywords:', translations);
+                    return translations;
+                } catch (e) {
+                    console.error('Translation error:', e);
+                    return targetLanguages.reduce((acc, lang) => ({ ...acc, [lang]: keywords }), {});
+                }
+            };
+
             // Fetch from Scopus (with Offset)
-            const fetchScopus = async (searchQuery: string, limit: number, offset: number = 0) => {
+            const fetchScopus = async (searchQuery: string, limit: number, offset: number = 0, langTag?: string) => {
                 try {
                     // Extended Date Range: Up to 2026 to include future publications
                     const startYear = config.dateRange?.start || 2023;
@@ -298,7 +356,8 @@ export default function ProjectWorkspace() {
                         link: generatePdfLink(entry['dc:title'], entry['prism:doi']),
                         abstract: entry['dc:description'] || 'No abstract available.',
                         keywords: '',
-                        sourceModel: 'scopus'
+                        sourceModel: 'scopus',
+                        searchLanguage: langTag
                     }));
                 } catch (e) {
                     console.error("Scopus fetch failed", e);
@@ -307,15 +366,19 @@ export default function ProjectWorkspace() {
             };
 
             // Fetch from Gemini (Extended Date)
-            const fetchGemini = async (searchQuery: string, limit: number) => {
+            const fetchGemini = async (searchQuery: string, limit: number, langTag?: string, languageName?: string) => {
                 try {
                     const startYear = config.dateRange?.start || 2023;
                     const endYear = config.dateRange?.end || 2026;
+                    const languageInstruction = languageName && languageName !== 'English'
+                        ? `\n- Focus on papers with titles/abstracts in ${languageName} or about ${languageName}-speaking regions when relevant.`
+                        : '';
+
                     const prompt = `You are a research assistant. Use Google Search to find ${limit} REAL, EXISTING, and VERIFIED academic papers (${startYear}-${endYear}) about: "${searchQuery}".
                 
                 IMPORTANT:
                 - Use the "googleSearch" tool to verify the existence of each paper.
-                - Do NOT hallucinate papers.
+                - Do NOT hallucinate papers.${languageInstruction}
                 - Return JSON ONLY.
 
                 Return JSON: {"articles":[{"authors":"...","title":"...","source":"...","year":"...","abstract":"...","doi":"..."}]}`;
@@ -352,7 +415,8 @@ export default function ProjectWorkspace() {
                         doi: e.doi || '',
                         link: generatePdfLink(e.title, e.doi),
                         abstract: e.abstract || '',
-                        sourceModel: 'gemini-3-pro-preview'
+                        sourceModel: 'gemini-3-pro-preview',
+                        searchLanguage: langTag
                     }));
                 } catch (e) {
                     console.error("Gemini fetch failed", e);
@@ -360,43 +424,76 @@ export default function ProjectWorkspace() {
                 }
             };
 
+            // Step 1: 翻譯關鍵詞到各選擇的語言
+            const translatedKeywords = await translateKeywords(config.keywords, selectedLanguages);
+
+            // Step 2: 對每種語言進行搜索
+            const allScopusResults: any[] = [];
+            const allGeminiResults: any[] = [];
+
+            // Calculate papers per language
+            const papersPerLanguage = Math.ceil(config.scopusCount / selectedLanguages.length);
+            const geminiPapersPerLanguage = Math.ceil(config.geminiCount / selectedLanguages.length);
+
             // Calculate offset based on existing Scopus papers
-            // Ideally we filter by query, but simple count is a decent proxy for "Next Batch"
             const existingScopusCount = currentResearchResults.filter(r => r.sourceModel === 'scopus').length;
 
-            setLoadingStatus(`🔍 Searching: "${config.keywords}" (${config.scopusCount} Scopus [Offset: ${existingScopusCount}], ${config.geminiCount} Gemini)...`);
+            for (let i = 0; i < selectedLanguages.length; i++) {
+                const langId = selectedLanguages[i];
+                const langName = LANGUAGE_MAP[langId]?.name || langId;
+                const translatedQuery = translatedKeywords[langId] || config.keywords;
 
-            // Define queries for Gemini (currently just the main keyword)
-            const geminiQueries = [config.keywords];
+                setLoadingStatus(`🔍 [${i + 1}/${selectedLanguages.length}] Searching in ${langName}: "${translatedQuery.substring(0, 30)}..."`);
 
-            const [scopusResults, geminiResultsBatches] = await Promise.all([
-                fetchScopus(config.keywords, config.scopusCount, existingScopusCount),
-                Promise.all(geminiQueries.map(async (q, i) => {
-                    // Optional: Update status if batched (though parallel makes it fast)
-                    if (geminiQueries.length > 1) setLoadingStatus(`🔍 Running Batch ${i + 1}/${geminiQueries.length}: "${q.substring(0, 20)}..."`);
-                    return fetchGemini(q, 15);
-                }))
-            ]);
+                // Scopus 搜索
+                const scopusPromise = fetchScopus(
+                    translatedQuery,
+                    papersPerLanguage,
+                    existingScopusCount + (i * papersPerLanguage),
+                    langId
+                );
+
+                // Gemini 搜索
+                const geminiPromise = fetchGemini(
+                    translatedQuery,
+                    geminiPapersPerLanguage,
+                    langId,
+                    langName
+                );
+
+                const [scopusRes, geminiRes] = await Promise.all([scopusPromise, geminiPromise]);
+
+                allScopusResults.push(...scopusRes);
+                allGeminiResults.push(...geminiRes);
+            }
 
             setLoadingStatus("Processing results...");
-            const geminiResults = geminiResultsBatches.flat();
 
-            const newPapers = [...scopusResults, ...geminiResults];
+            const newPapers = [...allScopusResults, ...allGeminiResults];
 
             // Deduplication: Filter out papers already present in current results
             const existingKeys = new Set(currentResearchResults.map((p: any) => (p.doi || p.title || '').toLowerCase()));
             const uniquePapers = newPapers.filter(p => !existingKeys.has((p.doi || p.title || '').toLowerCase()));
 
-            const mergedResults = [...currentResearchResults, ...uniquePapers];
-            setCurrentResearchResults(mergedResults);
-            setLatestSearchResults(uniquePapers); // Update ephemeral results with only NEW papers
+            // Also deduplicate within new results (same paper might appear in multiple languages)
+            const seenKeys = new Set<string>();
+            const deduplicatedPapers = uniquePapers.filter(p => {
+                const key = (p.doi || p.title || '').toLowerCase();
+                if (seenKeys.has(key)) return false;
+                seenKeys.add(key);
+                return true;
+            });
 
-            const skippedCount = newPapers.length - uniquePapers.length;
-            const statusMsg = uniquePapers.length > 0
-                ? `✅ Analyzed & Found ${uniquePapers.length} NEW papers for "${config.keywords}"`
+            const mergedResults = [...currentResearchResults, ...deduplicatedPapers];
+            setCurrentResearchResults(mergedResults);
+            setLatestSearchResults(deduplicatedPapers); // Update ephemeral results with only NEW papers
+
+            const skippedCount = newPapers.length - deduplicatedPapers.length;
+            const statusMsg = deduplicatedPapers.length > 0
+                ? `✅ Found ${deduplicatedPapers.length} NEW papers for "${config.keywords}" in ${languageNames}`
                 : `⚠️ Search completed but found NO new unique papers (all ${skippedCount} items were duplicates).`;
 
-            const extraMsg = skippedCount > 0 && uniquePapers.length > 0 ? ` (${skippedCount} duplicates skipped)` : '';
+            const extraMsg = skippedCount > 0 && deduplicatedPapers.length > 0 ? ` (${skippedCount} duplicates skipped)` : '';
 
             setMessages(prev => [...prev, {
                 role: 'model',
