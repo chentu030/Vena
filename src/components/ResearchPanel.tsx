@@ -7,7 +7,6 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import FileChatPanel from '@/components/FileChatPanel';
-import PdfViewer from '@/components/PdfViewer';
 import { TeamFile } from '@/lib/firestore';
 
 export interface ResearchGroup {
@@ -219,6 +218,21 @@ export default function ResearchPanel({ onClose, initialResults, onSave, groups 
                 const article = results.find(r => r.id === articleId);
                 const filename = `paper_${article?.year || 'unknown'}_${article?.title?.substring(0, 30).replace(/[^a-z0-9]/gi, '_') || articleId}.pdf`;
 
+                // 檢查 base64 大小（原始檔案大小約為 base64 大小的 75%）
+                const base64Size = base64Content.length;
+                const estimatedSize = Math.floor(base64Size * 0.75);
+                const MAX_SIZE = 35 * 1024 * 1024; // 35MB
+
+                if (estimatedSize > MAX_SIZE) {
+                    const sizeMB = Math.round(estimatedSize / 1024 / 1024);
+                    alert(`PDF 檔案太大 (${sizeMB}MB)！\n\n目前支援的最大檔案大小為 35MB。\n\n建議：\n1. 使用 PDF 壓縮工具減小檔案大小\n2. 直接上傳到 Google Drive 並複製分享連結`);
+                    setUploadingPdfId(null);
+                    setSelectedArticleId(null);
+                    return;
+                }
+
+                setProgress(`⬆️ Uploading PDF (${Math.round(estimatedSize / 1024 / 1024)}MB)...`);
+
                 try {
                     // Use local proxy API to bypass CORS
                     const response = await fetch('/api/upload-pdf', {
@@ -237,59 +251,66 @@ export default function ResearchPanel({ onClose, initialResults, onSave, groups 
 
                     // Try to parse the response
                     let driveUrl = '';
-                    try {
-                        const result = await response.json();
-                        if (result.status === 'success') {
-                            // 優先使用 embedUrl（如果 GAS 提供），否則從 URL 或 fileId 建構
-                            if (result.embedUrl) {
-                                driveUrl = result.embedUrl;
-                            } else if (result.fileId) {
-                                driveUrl = `https://drive.google.com/file/d/${result.fileId}/preview`;
-                            } else if (result.url) {
-                                // 嘗試從現有 URL 提取 fileId 並轉換為預覽格式
-                                const idMatch = result.url.match(/[?&]id=([^&]+)/) || result.url.match(/\/d\/([^/]+)/);
-                                if (idMatch) {
-                                    driveUrl = `https://drive.google.com/file/d/${idMatch[1]}/preview`;
-                                } else {
-                                    driveUrl = result.url;
-                                }
-                            }
+                    const result = await response.json();
+
+                    // 檢查錯誤狀態
+                    if (!response.ok) {
+                        console.error('Upload failed:', result);
+                        if (result.message) {
+                            alert(`上傳失敗：${result.message}`);
+                        } else if (result.error === 'File too large') {
+                            alert(`PDF 檔案太大！建議使用 PDF 壓縮工具或直接上傳到 Google Drive。`);
+                        } else if (result.error === 'GAS authentication error') {
+                            alert(`Google Apps Script 認證錯誤。\n\n${result.suggestion || '請確認 GAS 設定正確。'}`);
                         } else {
-                            console.log('GAS response:', result);
-                            // If we can't get URL, create a search link to Drive
-                            driveUrl = `https://drive.google.com/drive/search?q=${encodeURIComponent(filename)}`;
+                            alert(`上傳失敗：${result.error || 'Unknown error'}`);
                         }
-                    } catch {
-                        // If JSON parsing fails, create a search link
-                        driveUrl = `https://drive.google.com/drive/search?q=${encodeURIComponent(filename)}`;
+                        setUploadingPdfId(null);
+                        setSelectedArticleId(null);
+                        return;
                     }
 
-                    // Update article with the Drive URL
-                    const newArticleState = (prev: ResearchArticle[]) => prev.map(a =>
-                        a.id === articleId
-                            ? { ...a, pdfUrl: driveUrl, pdfStatus: 'success' as const }
-                            : a
-                    );
-
-                    setResults(prev => {
-                        const updated = newArticleState(prev);
-                        // Trigger immediate save to prevent data loss on refresh
-                        if (onAutoSave) {
-                            onAutoSave(updated);
-                            // Update ref to prevent double-save by effect
-                            // However, sanitization happens in effect. It's safer to let effect run too or update ref here.
-                            // Let's just fire it. The effect has a check for "currentStr === lastSavedRef.current".
-                            // So we should update lastSavedRef here too if we want to skip effect, OR just let it fire twice (redundant write but safe).
-                            // Better: Just fire it.
+                    if (result.status === 'success') {
+                        // 優先使用 embedUrl（如果 GAS 提供），否則從 URL 或 fileId 建構
+                        if (result.embedUrl) {
+                            driveUrl = result.embedUrl;
+                        } else if (result.fileId) {
+                            driveUrl = `https://drive.google.com/file/d/${result.fileId}/preview`;
+                        } else if (result.url) {
+                            // 嘗試從現有 URL 提取 fileId 並轉換為預覽格式
+                            const idMatch = result.url.match(/[?&]id=([^&]+)/) || result.url.match(/\/d\/([^/]+)/);
+                            if (idMatch) {
+                                driveUrl = `https://drive.google.com/file/d/${idMatch[1]}/preview`;
+                            } else {
+                                driveUrl = result.url;
+                            }
                         }
-                        return updated;
-                    });
 
-                    setProgress(`✅ PDF uploaded: ${article?.title?.substring(0, 40)}...`);
+                        // Update article with the Drive URL
+                        const newArticleState = (prev: ResearchArticle[]) => prev.map(a =>
+                            a.id === articleId
+                                ? { ...a, pdfUrl: driveUrl, pdfStatus: 'success' as const }
+                                : a
+                        );
+
+                        setResults(prev => {
+                            const updated = newArticleState(prev);
+                            // Trigger immediate save to prevent data loss on refresh
+                            if (onAutoSave) {
+                                onAutoSave(updated);
+                            }
+                            return updated;
+                        });
+
+                        setProgress(`✅ PDF uploaded: ${article?.title?.substring(0, 40)}...`);
+                    } else {
+                        console.log('GAS response:', result);
+                        alert(`上傳可能未成功。請檢查 Google Drive 確認檔案是否已上傳。`);
+                    }
 
                 } catch (error) {
                     console.error('PDF upload error:', error);
-                    alert('PDF upload failed. Please check GAS configuration.');
+                    alert('PDF 上傳失敗。請檢查網路連線和 GAS 設定。');
                 }
 
                 setUploadingPdfId(null);
@@ -1047,24 +1068,58 @@ Output only the keywords:`
                                     </button>
                                 </div>
                             </div>
-                            <div className="flex-1 overflow-hidden">
-                                <PdfViewer
-                                    url={previewArticle.pdfUrl!}
-                                    title={previewArticle.title}
-                                    fallbackUrl={(() => {
-                                        // 生成 Google Drive 開啟連結
-                                        const getFileId = (url: string): string | null => {
-                                            const fileMatch = url.match(/\/file\/d\/([^/]+)/) ||
-                                                url.match(/[?&]id=([^&]+)/) ||
-                                                url.match(/\/d\/([^/]+)/);
-                                            return fileMatch ? fileMatch[1] : null;
-                                        };
-                                        const fileId = getFileId(previewArticle.pdfUrl!);
-                                        return fileId
-                                            ? `https://drive.google.com/file/d/${fileId}/view`
-                                            : previewArticle.pdfUrl!;
-                                    })()}
-                                />
+                            <div className="flex-1 overflow-auto flex items-center justify-center bg-neutral-50 dark:bg-neutral-800/50 relative">
+                                {(() => {
+                                    // 將任何 Google Drive URL 轉換為可嵌入的預覽格式
+                                    const getPdfEmbedUrl = (url: string): string => {
+                                        if (!url) return '';
+
+                                        // 如果已經是 /preview 格式，直接使用
+                                        if (url.includes('/preview')) {
+                                            return url;
+                                        }
+
+                                        // 嘗試從各種 Google Drive URL 格式提取 fileId
+                                        let fileId = '';
+
+                                        // 格式: https://drive.google.com/file/d/FILE_ID/view
+                                        const fileMatch = url.match(/\/file\/d\/([^/]+)/);
+                                        if (fileMatch) {
+                                            fileId = fileMatch[1];
+                                        }
+
+                                        // 格式: https://drive.google.com/uc?export=download&id=FILE_ID
+                                        const ucMatch = url.match(/[?&]id=([^&]+)/);
+                                        if (!fileId && ucMatch) {
+                                            fileId = ucMatch[1];
+                                        }
+
+                                        // 格式: https://drive.google.com/open?id=FILE_ID
+                                        const openMatch = url.match(/open\?id=([^&]+)/);
+                                        if (!fileId && openMatch) {
+                                            fileId = openMatch[1];
+                                        }
+
+                                        if (fileId) {
+                                            // 使用 Google Drive 的直接預覽格式
+                                            return `https://drive.google.com/file/d/${fileId}/preview`;
+                                        }
+
+                                        // 如果無法解析，使用 Google Docs Viewer 作為後備方案
+                                        return `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
+                                    };
+
+                                    const embedUrl = getPdfEmbedUrl(previewArticle.pdfUrl!);
+
+                                    return (
+                                        <iframe
+                                            src={embedUrl}
+                                            className="w-full h-full"
+                                            title={previewArticle.title}
+                                            allow="autoplay"
+                                        />
+                                    );
+                                })()}
                             </div>
                         </div>
 
