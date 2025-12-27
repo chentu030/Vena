@@ -75,7 +75,7 @@ export default function MainEditor({ content, setContent, saveStatus = 'saved' }
         },
         onUpdate: ({ editor }) => {
             // Use Markdown as source of truth to avoid HTML/MD mixing issues when appending AI content
-            const output = (editor.storage.markdown as any).getMarkdown();
+            const output = (editor.storage as any).markdown.getMarkdown();
             console.log("Editor Update: Markdown output length", output.length);
             setContent(output);
         },
