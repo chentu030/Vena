@@ -127,6 +127,10 @@ export default function ResearchPanel({ onClose, initialResults, onSave, groups 
     const [previewArticle, setPreviewArticle] = useState<ResearchArticle | null>(null);
     const [showPdfChat, setShowPdfChat] = useState(false);
 
+    // Find PDF Confirmation State
+    const [showFindPdfConfirm, setShowFindPdfConfirm] = useState(false);
+    const [retryFailedPdfs, setRetryFailedPdfs] = useState(false);
+
     // Google Apps Script URL for Drive backup
     const GAS_URL = process.env.NEXT_PUBLIC_GAS_URL || '';
 
@@ -801,15 +805,7 @@ Output only the keywords:`
                                         <Play size={12} fill="currentColor" /> Deep Analysis
                                     </button>
                                     <button
-                                        onClick={() => {
-                                            if (projectId && user?.uid && currentGroupId) {
-                                                // Find group name
-                                                const groupName = groups.find(g => g.id === currentGroupId)?.name || 'Unknown Group';
-                                                startCheckPdf(results, projectId as string, currentGroupId, user.uid, projectName || 'Unknown Project', groupName, (updatedArticle: ResearchArticle) => {
-                                                    setResults(prev => prev.map(p => p.id === updatedArticle.id ? updatedArticle : p));
-                                                });
-                                            }
-                                        }}
+                                        onClick={() => setShowFindPdfConfirm(true)}
                                         className="flex items-center gap-1 px-3 py-1.5 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50 rounded-lg text-xs font-medium transition-colors"
                                     >
                                         <FileSearch size={12} /> Find PDFs
@@ -1061,6 +1057,77 @@ Output only the keywords:`
                                 setPreviewArticle(null);
                             }}
                         />
+                    </div>
+                </div>,
+                document.body
+            )}
+
+            {/* Find PDF Confirmation Modal */}
+            {showFindPdfConfirm && typeof document !== 'undefined' && ReactDOM.createPortal(
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                    <div className="bg-white dark:bg-neutral-900 rounded-xl shadow-2xl w-full max-w-md border border-border overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                        <div className="p-6 space-y-4">
+                            <div className="flex items-center gap-3">
+                                <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-full text-blue-600 dark:text-blue-400">
+                                    <FileSearch size={24} />
+                                </div>
+                                <div>
+                                    <h3 className="text-lg font-semibold">Start PDF Search?</h3>
+                                    <p className="text-sm text-muted-foreground">
+                                        This will search directly for PDFs for papers missing them.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="p-4 bg-neutral-50 dark:bg-neutral-800/50 rounded-lg border border-border/50">
+                                <label className="flex items-start gap-3 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        className="mt-1 w-4 h-4 rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
+                                        checked={retryFailedPdfs}
+                                        onChange={(e) => setRetryFailedPdfs(e.target.checked)}
+                                    />
+                                    <div className="text-sm">
+                                        <span className="font-medium">Retry previously failed papers</span>
+                                        <p className="text-muted-foreground text-xs mt-0.5">
+                                            If checked, we'll try again for papers marked as 'failed'. Useful if you updated the crawler logic.
+                                        </p>
+                                    </div>
+                                </label>
+                            </div>
+
+                            <div className="flex justify-end gap-3 pt-2">
+                                <button
+                                    onClick={() => setShowFindPdfConfirm(false)}
+                                    className="px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        if (projectId && user?.uid && currentGroupId) {
+                                            const groupName = groups.find(g => g.id === currentGroupId)?.name || 'Unknown Group';
+                                            startCheckPdf(
+                                                results,
+                                                projectId as string,
+                                                currentGroupId,
+                                                user.uid,
+                                                projectName || 'Unknown Project',
+                                                groupName,
+                                                (updatedArticle: ResearchArticle) => {
+                                                    setResults(prev => prev.map(p => p.id === updatedArticle.id ? updatedArticle : p));
+                                                },
+                                                retryFailedPdfs // Pass retry flag
+                                            );
+                                            setShowFindPdfConfirm(false);
+                                        }
+                                    }}
+                                    className="px-4 py-2 text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 rounded-lg shadow-sm transition-colors"
+                                >
+                                    Start Finding
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>,
                 document.body

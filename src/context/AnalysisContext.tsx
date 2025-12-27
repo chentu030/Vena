@@ -218,7 +218,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
     // BUT: The provided GAS code doesn't explicitly set CORS headers like "Access-Control-Allow-Origin". 
     // GAS ContentService usually handles it if "Execute as Me" and "Access: Anyone". 
 
-    const startCheckPdf = async (articles: ResearchArticle[], projectId: string, groupId: string, userId: string, projectName: string, groupName: string, onArticleUpdate?: (article: ResearchArticle) => void) => {
+    const startCheckPdf = async (articles: ResearchArticle[], projectId: string, groupId: string, userId: string, projectName: string, groupName: string, onArticleUpdate?: (article: ResearchArticle) => void, retryFailed: boolean = false) => {
         if (isAnalyzing) return;
 
         setIsAnalyzing(true);
@@ -226,7 +226,15 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
         abortControllerRef.current = new AbortController();
         const signal = abortControllerRef.current.signal;
 
-        const toCheck = articles.filter(a => !a.pdfUrl && !a.link?.endsWith('.pdf'));
+        const toCheck = articles.filter(a => {
+            // Already has PDF? Skip.
+            if (a.pdfUrl || a.link?.endsWith('.pdf')) return false;
+
+            // If failed previously, only check if retryFailed is true
+            if (a.pdfStatus === 'failed' && !retryFailed) return false;
+
+            return true;
+        });
 
         // Initial Progress
         setProgress({ current: 0, total: toCheck.length, message: `Initializing Backup Folders...` });
