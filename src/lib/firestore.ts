@@ -769,6 +769,7 @@ export interface TeamFile {
     color?: string;
     icon?: string;
     driveId?: string;
+    storagePath?: string; // Firebase Storage path
 }
 // File Management
 // File Management
@@ -826,15 +827,13 @@ export const updateFolderStyle = async (teamId: string, fileId: string, color: s
     }
 };
 
-export const addTeamFile = async (teamId: string, file: TeamFile) => {
+export const addTeamFile = async (teamId: string, file: Omit<TeamFile, 'id'> & { id?: string }) => {
     try {
         const filesRef = collection(db, `teams/${teamId}/files`);
-        // Use setDoc with a specific ID if provided, or addDoc
-        if (file.id) {
-            await setDoc(doc(filesRef, file.id), file);
-        } else {
-            await setDoc(doc(filesRef), file);
-        }
+        // 如果沒有提供 id，生成一個新的
+        const fileId = file.id || `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const fileWithId = { ...file, id: fileId };
+        await setDoc(doc(filesRef, fileId), fileWithId);
     } catch (e) {
         console.error("Error adding team file", e);
         throw e;

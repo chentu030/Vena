@@ -546,7 +546,7 @@ export default function TeamDetailPage() {
                                 uploadedAt: new Date(),
                                 color: 'blue',
                                 icon: 'File'
-                            } as TeamFile);
+                            });
                         } catch (firestoreError) {
                             console.error("Firestore save failed but Storage upload success:", firestoreError);
                         }
