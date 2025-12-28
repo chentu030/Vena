@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     ArrowBigUp, ArrowBigDown, MessageSquare, Share2, Bookmark,
     Plus, TrendingUp, Clock, Award, ChevronDown, Users, Search,
-    X, Link as LinkIcon, FileText, Image as ImageIcon, Loader2, Sparkles, Flame, Shield, Globe
+    X, Link as LinkIcon, FileText, Image as ImageIcon, Loader2, Sparkles, Flame, Shield, Globe, UploadCloud, File, Trash2
 } from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
 import { useAuth } from '@/lib/auth';
@@ -14,6 +14,8 @@ import {
     Community, CommunityPost, subscribeToPosts, subscribeToCommunities,
     createPost, votePost, createCommunity, getUserKarma, UserKarma
 } from '@/lib/firestore';
+import { storage } from '@/lib/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 type SortType = 'hot' | 'new' | 'top';
 type PostType = 'text' | 'link' | 'paper' | 'image';
@@ -36,7 +38,9 @@ export default function CommunityPage() {
     const [postType, setPostType] = useState<PostType>('text');
     const [postLink, setPostLink] = useState('');
     const [postCommunity, setPostCommunity] = useState('');
+    const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Create Community Form
     const [communityName, setCommunityName] = useState('');
@@ -86,18 +90,42 @@ export default function CommunityPage() {
         await votePost(postId, user.uid, voteType);
     };
 
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0]) {
+            setSelectedFile(e.target.files[0]);
+        }
+    };
+
     const handleCreatePost = async () => {
         if (!user || !postTitle.trim() || !postCommunity) return;
         setIsSubmitting(true);
         const community = communities.find(c => c.id === postCommunity);
+
         try {
+            let finalLinkUrl = postLink;
+            let finalImageUrl = undefined;
+
+            if (selectedFile) {
+                const storagePath = `community/${postCommunity}/${Date.now()}_${selectedFile.name}`;
+                const storageRef = ref(storage, storagePath);
+                await uploadBytes(storageRef, selectedFile);
+                const downloadUrl = await getDownloadURL(storageRef);
+
+                if (postType === 'image') {
+                    finalImageUrl = downloadUrl;
+                } else if (postType === 'paper') {
+                    finalLinkUrl = downloadUrl;
+                }
+            }
+
             await createPost({
                 communityId: postCommunity,
                 communityName: community?.displayName || community?.name || 'general',
                 title: postTitle,
                 content: postContent,
                 type: postType,
-                linkUrl: postType === 'link' ? postLink : undefined,
+                linkUrl: finalLinkUrl || undefined,
+                imageUrl: finalImageUrl,
                 authorId: user.uid,
                 authorName: user.displayName || 'Anonymous',
                 authorEmail: user.email || ''
@@ -107,6 +135,7 @@ export default function CommunityPage() {
             setPostContent('');
             setPostLink('');
             setPostType('text');
+            setSelectedFile(null);
         } catch (error) {
             console.error('Failed to create post:', error);
         } finally {
@@ -332,7 +361,13 @@ export default function CommunityPage() {
                                                         </p>
                                                     )}
 
-                                                    {post.linkUrl && (
+                                                    {post.imageUrl && (
+                                                        <div className="mb-4 rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-800 max-h-[400px]">
+                                                            <img src={post.imageUrl} alt="Post content" className="w-full h-full object-cover" />
+                                                        </div>
+                                                    )}
+
+                                                    {(post.linkUrl && post.type === 'link') && (
                                                         <div className="mb-4 p-3 rounded-xl bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/30 flex items-center gap-3 group/link">
                                                             <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-800/30 flex items-center justify-center text-blue-500">
                                                                 <LinkIcon size={20} />
@@ -347,6 +382,29 @@ export default function CommunityPage() {
                                                             </div>
                                                         </div>
                                                     )}
+
+                                                    {(post.linkUrl && post.type === 'paper') && (
+                                                        <div className="mb-4 p-3 rounded-xl bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 flex items-center gap-3 group/file">
+                                                            <div className="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-600">
+                                                                <FileText size={20} />
+                                                            </div>
+                                                            <div className="flex-1 overflow-hidden">
+                                                                <div className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate group-hover/file:underline">
+                                                                    PDF Document
+                                                                </div>
+                                                                <a
+                                                                    href={post.linkUrl}
+                                                                    target="_blank"
+                                                                    rel="noopener noreferrer"
+                                                                    className="text-xs text-blue-500 hover:underline"
+                                                                    onClick={e => e.stopPropagation()}
+                                                                >
+                                                                    Download / View
+                                                                </a>
+                                                            </div>
+                                                        </div>
+                                                    )}
+
 
                                                     <div className="flex items-center gap-4 text-xs font-medium text-neutral-500 uppercase tracking-wide">
                                                         <div className="flex items-center gap-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 px-2 py-1 rounded-md transition-colors">
@@ -459,11 +517,15 @@ export default function CommunityPage() {
                                     {[
                                         { id: 'text', label: 'Text', icon: FileText },
                                         { id: 'link', label: 'Link', icon: LinkIcon },
-                                        { id: 'image', label: 'Media', icon: ImageIcon }
+                                        { id: 'image', label: 'Image', icon: ImageIcon },
+                                        { id: 'paper', label: 'Article (PDF)', icon: UploadCloud }
                                     ].map((tab) => (
                                         <button
                                             key={tab.id}
-                                            onClick={() => setPostType(tab.id as PostType)}
+                                            onClick={() => {
+                                                setPostType(tab.id as PostType);
+                                                setSelectedFile(null); // Reset file selection on type switch
+                                            }}
                                             className={`px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2 ${postType === tab.id
                                                 ? 'bg-white dark:bg-neutral-700 shadow-sm text-black dark:text-white'
                                                 : 'text-neutral-500 hover:text-neutral-700'
@@ -514,6 +576,46 @@ export default function CommunityPage() {
                                             className="w-full p-4 bg-neutral-50 dark:bg-neutral-800 rounded-xl outline-none border border-transparent focus:border-blue-500 transition-colors"
                                         />
                                     )}
+
+                                    {(postType === 'image' || postType === 'paper') && (
+                                        <div className="w-full">
+                                            {!selectedFile ? (
+                                                <div
+                                                    className="w-full h-48 border-2 border-dashed border-neutral-300 dark:border-neutral-700 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"
+                                                    onClick={() => fileInputRef.current?.click()}
+                                                >
+                                                    <div className="w-12 h-12 bg-neutral-100 dark:bg-neutral-800 rounded-full flex items-center justify-center text-neutral-400 mb-3">
+                                                        <UploadCloud size={24} />
+                                                    </div>
+                                                    <p className="text-neutral-500 font-medium">Click or Drag to Upload {postType === 'image' ? 'Image' : 'PDF'}</p>
+                                                    <p className="text-neutral-400 text-xs mt-1">{postType === 'image' ? 'JPG, PNG, GIF' : 'PDF up to 10MB'}</p>
+                                                    <input
+                                                        type="file"
+                                                        ref={fileInputRef}
+                                                        className="hidden"
+                                                        accept={postType === 'image' ? "image/*" : "application/pdf"}
+                                                        onChange={handleFileSelect}
+                                                    />
+                                                </div>
+                                            ) : (
+                                                <div className="w-full p-4 bg-neutral-50 dark:bg-neutral-800 rounded-xl flex items-center gap-4">
+                                                    <div className="w-12 h-12 bg-neutral-200 dark:bg-neutral-700 rounded-lg flex items-center justify-center text-neutral-500">
+                                                        {postType === 'image' ? <ImageIcon size={24} /> : <FileText size={24} />}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="font-medium truncate">{selectedFile.name}</p>
+                                                        <p className="text-xs text-neutral-400">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => setSelectedFile(null)}
+                                                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                                    >
+                                                        <Trash2 size={20} />
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -527,9 +629,10 @@ export default function CommunityPage() {
                                 <button
                                     onClick={handleCreatePost}
                                     disabled={!postTitle.trim() || !postCommunity || isSubmitting}
-                                    className="px-8 py-2.5 bg-black dark:bg-white text-white dark:text-black rounded-full text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+                                    className="px-8 py-2.5 bg-black dark:bg-white text-white dark:text-black rounded-full text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity flex items-center gap-2"
                                 >
-                                    {isSubmitting ? 'Posting...' : 'Post'}
+                                    {isSubmitting && <Loader2 className="animate-spin" size={16} />}
+                                    {isSubmitting ? 'Uploading...' : 'Post'}
                                 </button>
                             </div>
                         </motion.div>
