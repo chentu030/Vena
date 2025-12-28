@@ -81,11 +81,12 @@ Rules:
             let config = {
                 projectName: searchTerm.substring(0, 50),
                 keywords: searchTerm,
-                languages: ['en'],
+                languages: ['en'] as string[],
                 startYear: 2020,
                 endYear: 2025,
                 scopusCount: 15,
-                geminiCount: 15
+                geminiCount: 15,
+                additionalInstructions: ''
             };
 
             if (data.text) {
