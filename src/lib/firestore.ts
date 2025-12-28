@@ -1095,8 +1095,17 @@ export const subscribeToCommunities = (callback: (communities: Community[]) => v
 // Post CRUD
 export const createPost = async (post: Omit<CommunityPost, 'id' | 'createdAt' | 'updatedAt' | 'upvotes' | 'downvotes' | 'commentCount'>) => {
     const docRef = doc(collection(db, 'posts'));
+
+    // Clean undefined values - Firestore doesn't accept undefined
+    const cleanPost: Record<string, any> = {};
+    Object.entries(post).forEach(([key, value]) => {
+        if (value !== undefined) {
+            cleanPost[key] = value;
+        }
+    });
+
     await setDoc(docRef, {
-        ...post,
+        ...cleanPost,
         id: docRef.id,
         upvotes: [post.authorId], // Auto-upvote own post
         downvotes: [],
