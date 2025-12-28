@@ -1028,7 +1028,7 @@ export interface CommunityPost {
     communityName: string;
     title: string;
     content: string;
-    type: 'text' | 'link' | 'paper' | 'image';
+    type: 'text' | 'link' | 'paper' | 'image' | 'video' | 'audio' | 'mixed';
     linkUrl?: string;
     imageUrl?: string;
     paperDoi?: string;

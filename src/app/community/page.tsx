@@ -14,7 +14,7 @@ import {
     Community, CommunityPost, subscribeToPosts, subscribeToCommunities,
     createPost, votePost, createCommunity, getUserKarma, UserKarma, PostAttachment
 } from '@/lib/firestore';
-import { storage } from '@/lib/firebase';
+import { getPdfStorage } from '@/lib/firebase-storage';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -24,6 +24,7 @@ type PostType = 'text' | 'link' | 'paper' | 'image' | 'video' | 'audio' | 'mixed
 export default function CommunityPage() {
     const router = useRouter();
     const { user, loading } = useAuth();
+    const storage = getPdfStorage();
     const [posts, setPosts] = useState<CommunityPost[]>([]);
     const [communities, setCommunities] = useState<Community[]>([]);
     const [selectedCommunity, setSelectedCommunity] = useState<string | null>(null);
