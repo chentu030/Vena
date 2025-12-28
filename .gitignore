@@ -46,3 +46,10 @@ next-env.d.ts
 
 .vercel
 .env*.local
+
+# Google Service Account credentials - NEVER commit these!
+*.json.key
+*-credentials.json
+*service-account*.json
+vena-pdf-uploader*.json
+google-*.json

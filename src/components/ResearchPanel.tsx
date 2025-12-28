@@ -185,146 +185,66 @@ export default function ResearchPanel({ onClose, initialResults, onSave, groups 
         return `https://scholar.google.com/scholar?q=${encodeURIComponent(title)}`;
     };
 
-    // Handle PDF file upload to Google Drive via GAS
+    // Handle PDF file upload to Firebase Storage
     const handlePdfUpload = async (file: File, articleId: string) => {
-        if (!GAS_URL) {
-            alert('Google Apps Script URL not configured');
-            return;
-        }
+        // 動態導入 Firebase Storage 上傳函數
+        const { uploadPdfToFirebase } = await import('@/lib/pdf-upload');
 
         setUploadingPdfId(articleId);
 
         try {
-            // Fetch driveFolderId from Firestore for the current group
-            let parentId: string | undefined;
-            if (currentGroupId && targetUserId && projectId) {
-                try {
-                    const groupRef = doc(db, `users/${targetUserId}/projects/${projectId}/researchGroups`, currentGroupId);
-                    const groupSnap = await getDoc(groupRef);
-                    if (groupSnap.exists()) {
-                        parentId = groupSnap.data()?.driveFolderId;
+            const article = results.find(r => r.id === articleId);
+            const filename = `paper_${article?.year || 'unknown'}_${article?.title?.substring(0, 30).replace(/[^a-z0-9]/gi, '_') || articleId}_${Date.now()}.pdf`;
+
+            const sizeMB = Math.round(file.size / 1024 / 1024);
+            setProgress(`⬆️ Uploading PDF (${sizeMB}MB) to Firebase Storage...`);
+
+            // 使用 Firebase Storage 上傳（支援大檔案）
+            const result = await uploadPdfToFirebase(
+                file,
+                filename,
+                projectId || 'default',
+                currentGroupId || 'default',
+                (progress) => {
+                    // 更新進度
+                    if (progress.state === 'running') {
+                        setProgress(`⬆️ Uploading PDF: ${progress.progress}%`);
+                    } else if (progress.state === 'success') {
+                        setProgress(`✅ PDF uploaded successfully!`);
+                    } else if (progress.state === 'error') {
+                        setProgress(`❌ Upload failed: ${progress.error}`);
                     }
-                } catch (e) {
-                    console.warn('Failed to fetch group folder ID for upload', e);
                 }
+            );
+
+            if (result.success && result.downloadUrl) {
+                // 更新文章的 PDF URL
+                const newArticleState = (prev: ResearchArticle[]) => prev.map(a =>
+                    a.id === articleId
+                        ? { ...a, pdfUrl: result.downloadUrl, pdfStatus: 'success' as const }
+                        : a
+                );
+
+                setResults(prev => {
+                    const updated = newArticleState(prev);
+                    if (onAutoSave) {
+                        onAutoSave(updated);
+                    }
+                    return updated;
+                });
+
+                setProgress(`✅ PDF uploaded: ${article?.title?.substring(0, 40)}...`);
+            } else {
+                console.error('Upload failed:', result.error);
+                alert(`上傳失敗：${result.error || 'Unknown error'}`);
             }
 
-            // Convert file to Base64
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-
-            reader.onload = async () => {
-                const base64Content = (reader.result as string).split(',')[1];
-                const article = results.find(r => r.id === articleId);
-                const filename = `paper_${article?.year || 'unknown'}_${article?.title?.substring(0, 30).replace(/[^a-z0-9]/gi, '_') || articleId}.pdf`;
-
-                // 檢查 base64 大小（原始檔案大小約為 base64 大小的 75%）
-                const base64Size = base64Content.length;
-                const estimatedSize = Math.floor(base64Size * 0.75);
-                const MAX_SIZE = 35 * 1024 * 1024; // 35MB
-
-                if (estimatedSize > MAX_SIZE) {
-                    const sizeMB = Math.round(estimatedSize / 1024 / 1024);
-                    alert(`PDF 檔案太大 (${sizeMB}MB)！\n\n目前支援的最大檔案大小為 35MB。\n\n建議：\n1. 使用 PDF 壓縮工具減小檔案大小\n2. 直接上傳到 Google Drive 並複製分享連結`);
-                    setUploadingPdfId(null);
-                    setSelectedArticleId(null);
-                    return;
-                }
-
-                setProgress(`⬆️ Uploading PDF (${Math.round(estimatedSize / 1024 / 1024)}MB)...`);
-
-                try {
-                    // Use local proxy API to bypass CORS
-                    const response = await fetch('/api/upload-pdf', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            action: 'upload',
-                            filename: filename,
-                            mimeType: 'application/pdf',
-                            fileContent: base64Content,
-                            parentId: parentId // Pass folder ID to GAS
-                        })
-                    });
-
-                    // Try to parse the response
-                    let driveUrl = '';
-                    const result = await response.json();
-
-                    // 檢查錯誤狀態
-                    if (!response.ok) {
-                        console.error('Upload failed:', result);
-                        if (result.message) {
-                            alert(`上傳失敗：${result.message}`);
-                        } else if (result.error === 'File too large') {
-                            alert(`PDF 檔案太大！建議使用 PDF 壓縮工具或直接上傳到 Google Drive。`);
-                        } else if (result.error === 'GAS authentication error') {
-                            alert(`Google Apps Script 認證錯誤。\n\n${result.suggestion || '請確認 GAS 設定正確。'}`);
-                        } else {
-                            alert(`上傳失敗：${result.error || 'Unknown error'}`);
-                        }
-                        setUploadingPdfId(null);
-                        setSelectedArticleId(null);
-                        return;
-                    }
-
-                    if (result.status === 'success') {
-                        // 優先使用 embedUrl（如果 GAS 提供），否則從 URL 或 fileId 建構
-                        if (result.embedUrl) {
-                            driveUrl = result.embedUrl;
-                        } else if (result.fileId) {
-                            driveUrl = `https://drive.google.com/file/d/${result.fileId}/preview`;
-                        } else if (result.url) {
-                            // 嘗試從現有 URL 提取 fileId 並轉換為預覽格式
-                            const idMatch = result.url.match(/[?&]id=([^&]+)/) || result.url.match(/\/d\/([^/]+)/);
-                            if (idMatch) {
-                                driveUrl = `https://drive.google.com/file/d/${idMatch[1]}/preview`;
-                            } else {
-                                driveUrl = result.url;
-                            }
-                        }
-
-                        // Update article with the Drive URL
-                        const newArticleState = (prev: ResearchArticle[]) => prev.map(a =>
-                            a.id === articleId
-                                ? { ...a, pdfUrl: driveUrl, pdfStatus: 'success' as const }
-                                : a
-                        );
-
-                        setResults(prev => {
-                            const updated = newArticleState(prev);
-                            // Trigger immediate save to prevent data loss on refresh
-                            if (onAutoSave) {
-                                onAutoSave(updated);
-                            }
-                            return updated;
-                        });
-
-                        setProgress(`✅ PDF uploaded: ${article?.title?.substring(0, 40)}...`);
-                    } else {
-                        console.log('GAS response:', result);
-                        alert(`上傳可能未成功。請檢查 Google Drive 確認檔案是否已上傳。`);
-                    }
-
-                } catch (error) {
-                    console.error('PDF upload error:', error);
-                    alert('PDF 上傳失敗。請檢查網路連線和 GAS 設定。');
-                }
-
-                setUploadingPdfId(null);
-                setSelectedArticleId(null);
-            };
-
-            reader.onerror = () => {
-                alert('Failed to read file');
-                setUploadingPdfId(null);
-            };
-
-        } catch (error) {
+        } catch (error: any) {
             console.error('PDF upload error:', error);
+            alert(`PDF 上傳失敗：${error.message || 'Unknown error'}`);
+        } finally {
             setUploadingPdfId(null);
+            setSelectedArticleId(null);
         }
     };
 
@@ -1109,7 +1029,27 @@ Output only the keywords:`
                                         return `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
                                     };
 
-                                    const embedUrl = getPdfEmbedUrl(previewArticle.pdfUrl!);
+                                    // 檢查是否為 Firebase Storage URL
+                                    const isFirebaseStorageUrl = (url: string): boolean => {
+                                        return url.includes('firebasestorage.googleapis.com') ||
+                                            url.includes('firebasestorage.app');
+                                    };
+
+                                    const pdfUrl = previewArticle.pdfUrl!;
+
+                                    // Firebase Storage URL 可以直接在 iframe 中使用
+                                    if (isFirebaseStorageUrl(pdfUrl)) {
+                                        return (
+                                            <iframe
+                                                src={pdfUrl}
+                                                className="w-full h-full"
+                                                title={previewArticle.title}
+                                            />
+                                        );
+                                    }
+
+                                    // Google Drive URL 需要轉換為預覽格式
+                                    const embedUrl = getPdfEmbedUrl(pdfUrl);
 
                                     return (
                                         <iframe

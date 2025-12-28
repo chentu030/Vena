@@ -493,7 +493,9 @@ export default function TeamDetailPage() {
         if (!e.target.files || !teamId || !user) return;
 
         const filesToUpload = Array.from(e.target.files);
-        // setIsLoadingFiles(true); // Don't full lock, just show activity maybe? or sidebar
+
+        // 動態導入 Firebase Storage 上傳函數
+        const { uploadPdfToFirebase } = await import('@/lib/pdf-upload');
 
         // Add to queue
         const newQueueItems = filesToUpload.map(f => ({
@@ -512,73 +514,54 @@ export default function TeamDetailPage() {
                 setUploadQueue(prev => prev.map(item => item.id === queueItem.id ? { ...item, status: 'uploading', progress: 10 } : item));
 
                 try {
-                    // 1. Convert to Base64
-                    const base64Content = await fileToBase64(file);
+                    // 使用 Firebase Storage 上傳（支援大檔案）
+                    const result = await uploadPdfToFirebase(
+                        file,
+                        `${Date.now()}_${file.name}`,
+                        teamId,
+                        currentFolderId || 'root',
+                        (progress) => {
+                            // 更新上傳進度
+                            setUploadQueue(prev => prev.map(item =>
+                                item.id === queueItem.id
+                                    ? { ...item, progress: Math.round(progress.progress * 0.8) + 10 } // 10-90%
+                                    : item
+                            ));
+                        }
+                    );
 
-                    // Update progress to indicate processing
-                    setUploadQueue(prev => prev.map(item => item.id === queueItem.id ? { ...item, progress: 30 } : item));
+                    if (result.success && result.downloadUrl) {
+                        setUploadQueue(prev => prev.map(item => item.id === queueItem.id ? { ...item, progress: 90 } : item));
 
-                    // 2. Upload to GAS
-                    let parentDriveId = null;
-                    if (currentFolderId) {
-                        const parentFolder = files.find(f => f.id === currentFolderId);
-                        if (parentFolder) parentDriveId = parentFolder.driveId;
-                    } else if (team?.driveId) {
-                        parentDriveId = team.driveId;
-                    }
-
-                    const res = await fetch(GAS_API_URL, {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            action: 'upload',
-                            filename: file.name,
-                            mimeType: file.type,
-                            fileContent: base64Content,
-                            parentId: parentDriveId
-                        })
-                    });
-
-                    const data = await res.json();
-
-                    if (data.status === 'success') {
-                        setUploadQueue(prev => prev.map(item => item.id === queueItem.id ? { ...item, progress: 80 } : item));
-
-                        // 3. Save to Firestore
+                        // Save to Firestore
                         try {
                             await addTeamFile(teamId, {
                                 name: file.name,
-                                url: data.url, // URL from GAS
+                                url: result.downloadUrl,
                                 type: file.type || 'application/octet-stream',
                                 size: file.size,
                                 parentId: currentFolderId,
-                                driveId: data.fileId, // Save Drive ID
+                                storagePath: result.storagePath,
                                 uploadedBy: user.email!,
                                 uploadedAt: new Date(),
                                 color: 'blue',
                                 icon: 'File'
                             } as TeamFile);
                         } catch (firestoreError) {
-                            console.error("Firestore save failed but Drive upload success:", firestoreError);
-                            // We still mark as completed because the file IS in Drive, loop will likely see it soon via sync?
-                            // Or better: show warning. But user sees file. So let's mark success.
+                            console.error("Firestore save failed but Storage upload success:", firestoreError);
                         }
 
                         setUploadQueue(prev => prev.map(item => item.id === queueItem.id ? { ...item, progress: 100, status: 'completed' } : item));
                     } else {
-                        throw new Error(data.message || "GAS Upload failed");
+                        throw new Error(result.error || "Firebase Storage upload failed");
                     }
-                } catch (error) {
-                    // Specific error handling per file
+                } catch (error: any) {
                     console.error("Upload error for file:", file.name, error);
-
-                    // If we suspect the file WAS uploaded but something else failed (e.g. Firestore timeout), we might still want to show success if possible?
-                    // But for now, sticking to error.
                     setUploadQueue(prev => prev.map(item => item.id === queueItem.id ? { ...item, status: 'error' } : item));
                 }
             }));
 
-            // Success toast is shown if at least one succeeded? Or generic message.
-            showToast('Process completed', 'success');
+            showToast('Upload completed', 'success');
         } catch (error) {
             console.error("Critical upload error", error);
             showToast('Critical upload service error', 'error');
@@ -2371,7 +2354,12 @@ export default function TeamDetailPage() {
                                         />
                                     ) : (previewFile.type === 'application/pdf' || previewFile.name.toLowerCase().endsWith('.pdf')) ? (
                                         <iframe
-                                            src={`https://docs.google.com/viewer?url=${encodeURIComponent(previewFile.url || '')}&embedded=true`}
+                                            src={
+                                                // Firebase Storage URL 可以直接使用
+                                                (previewFile.url?.includes('firebasestorage.googleapis.com') || previewFile.url?.includes('firebasestorage.app'))
+                                                    ? previewFile.url
+                                                    : `https://docs.google.com/viewer?url=${encodeURIComponent(previewFile.url || '')}&embedded=true`
+                                            }
                                             className={`w-full h-full transition-opacity duration-300 ${isPreviewLoading ? 'opacity-0' : 'opacity-100'}`}
                                             title={previewFile.name}
                                             onLoad={() => setIsPreviewLoading(false)}
