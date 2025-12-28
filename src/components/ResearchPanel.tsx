@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ReactDOM from 'react-dom';
-import { Search, FileText, ExternalLink, Loader2, Table, Download, Play, BookOpen, Calendar, Save, Trash2, FolderPlus, ChevronDown, Upload, Edit2, X, FileSearch, Eye } from 'lucide-react';
+import { Search, FileText, ExternalLink, Loader2, Table, Download, Play, BookOpen, Calendar, Save, Trash2, FolderPlus, ChevronDown, Upload, Edit2, X, FileSearch, Eye, FolderInput, Check, Folder } from 'lucide-react';
 import { useAnalysis } from '@/context/AnalysisContext';
 import { useAuth } from '@/lib/auth';
 import { useParams, useSearchParams } from 'next/navigation';
@@ -28,6 +28,7 @@ interface ResearchPanelProps {
     onRenameGroup?: (groupId: string, newName: string) => void;
     onDeleteGroup?: (groupId: string) => void;
     onAutoSave?: (papers: ResearchArticle[]) => void;
+    onMovePapers?: (papers: ResearchArticle[], targetGroupId: string) => void;
     projectName?: string; // For hierarchical folder structure
 }
 
@@ -48,10 +49,24 @@ export interface ResearchArticle {
     sourceModel?: string; // 'scopus' | 'gemini-2.0-flash' | 'gemini-3-pro-preview' etc.
 }
 
-export default function ResearchPanel({ onClose, initialResults, onSave, groups = [], currentGroupId, onGroupChange, onCreateGroup, onRenameGroup, onDeleteGroup, onAutoSave, projectName }: ResearchPanelProps) {
+export default function ResearchPanel({ onClose, initialResults, onSave, groups = [], currentGroupId, onGroupChange, onCreateGroup, onRenameGroup, onDeleteGroup, onAutoSave, onMovePapers, projectName }: ResearchPanelProps) {
     const [query, setQuery] = useState('');
     const [results, setResults] = useState<ResearchArticle[]>(initialResults || []);
     const [isLoading, setIsLoading] = useState(false);
+
+    const filteredResults = useMemo(() => {
+        return results.filter(article =>
+            !query ||
+            article.title.toLowerCase().includes(query.toLowerCase()) ||
+            (article.authors && article.authors.toLowerCase().includes(query.toLowerCase())) ||
+            (article.keywords && article.keywords.toLowerCase().includes(query.toLowerCase())) ||
+            (article.source && article.source.toLowerCase().includes(query.toLowerCase())) ||
+            (article.year && String(article.year).includes(query)) ||
+            (article.doi && article.doi.toLowerCase().includes(query.toLowerCase())) ||
+            (article.abstract && article.abstract.toLowerCase().includes(query.toLowerCase())) ||
+            (article.methodology && article.methodology.toLowerCase().includes(query.toLowerCase()))
+        );
+    }, [results, query]);
 
 
     // const [isAnalyzing, setIsAnalyzing] = useState(false); // Refactored to global context
@@ -127,9 +142,59 @@ export default function ResearchPanel({ onClose, initialResults, onSave, groups 
     const [previewArticle, setPreviewArticle] = useState<ResearchArticle | null>(null);
     const [showPdfChat, setShowPdfChat] = useState(false);
 
+
+
     // Find PDF Confirmation State
     const [showFindPdfConfirm, setShowFindPdfConfirm] = useState(false);
     const [retryFailedPdfs, setRetryFailedPdfs] = useState(false);
+
+    // Batch Selection State
+    const [selectedPaperIds, setSelectedPaperIds] = useState<Set<string>>(new Set());
+    const [showMoveDropdown, setShowMoveDropdown] = useState(false);
+
+    const handleSelectAll = (checked: boolean) => {
+        if (checked) {
+            const newSet = new Set(selectedPaperIds);
+            filteredResults.forEach(r => newSet.add(r.id));
+            setSelectedPaperIds(newSet);
+        } else {
+            const newSet = new Set(selectedPaperIds);
+            filteredResults.forEach(r => newSet.delete(r.id));
+            setSelectedPaperIds(newSet);
+        }
+    };
+
+    const handleSelectPaper = (id: string, checked: boolean) => {
+        const newSet = new Set(selectedPaperIds);
+        if (checked) {
+            newSet.add(id);
+        } else {
+            newSet.delete(id);
+        }
+        setSelectedPaperIds(newSet);
+    };
+
+    const handleBatchDelete = () => {
+        if (selectedPaperIds.size === 0) return;
+        if (!confirm(`Are you sure you want to delete ${selectedPaperIds.size} papers?`)) return;
+
+        setResults(prev => prev.filter(p => !selectedPaperIds.has(p.id)));
+        setSelectedPaperIds(new Set());
+    };
+
+    const handleBatchMove = (targetGroupId: string) => {
+        if (!onMovePapers || selectedPaperIds.size === 0 || !targetGroupId) return;
+
+        const papersToMove = results.filter(p => selectedPaperIds.has(p.id));
+        onMovePapers(papersToMove, targetGroupId);
+
+        // Remove from current view if it's not the target group
+        if (currentGroupId !== targetGroupId) {
+            setResults(prev => prev.filter(p => !selectedPaperIds.has(p.id)));
+        }
+        setSelectedPaperIds(new Set());
+        setShowMoveDropdown(false);
+    };
 
     // Google Apps Script URL for Drive backup
     const GAS_URL = process.env.NEXT_PUBLIC_GAS_URL || '';
@@ -741,6 +806,61 @@ Output only the keywords:`
 
                     {/* Controls */}
                     <div className="p-6 border-b border-border/40 space-y-4">
+                        {/* Batch Operations Toolbar */}
+                        {selectedPaperIds.size > 0 && (
+                            <div className="flex items-center gap-2 bg-blue-50 dark:bg-blue-900/20 p-2 rounded-lg border border-blue-100 dark:border-blue-800 animate-in fade-in slide-in-from-top-1">
+                                <span className="text-sm font-medium text-blue-700 dark:text-blue-300 ml-1">
+                                    {selectedPaperIds.size} selected
+                                </span>
+                                <div className="h-4 w-px bg-blue-200 dark:bg-blue-700 mx-1" />
+
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setShowMoveDropdown(!showMoveDropdown)}
+                                        className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-800 rounded transition-colors"
+                                    >
+                                        <FolderInput size={14} />
+                                        Move to...
+                                    </button>
+
+                                    {showMoveDropdown && (
+                                        <div className="absolute top-full left-0 mt-1 w-48 bg-white dark:bg-neutral-800 border border-border rounded-lg shadow-lg z-50 py-1 max-h-60 overflow-y-auto">
+                                            {groups.filter(g => g.id !== currentGroupId).map(group => (
+                                                <button
+                                                    key={group.id}
+                                                    onClick={() => handleBatchMove(group.id)}
+                                                    className="w-full text-left px-3 py-2 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2"
+                                                >
+                                                    <Folder size={14} className="text-blue-500" />
+                                                    <span className="truncate">{group.name}</span>
+                                                </button>
+                                            ))}
+                                            {groups.filter(g => g.id !== currentGroupId).length === 0 && (
+                                                <div className="px-3 py-2 text-xs text-muted-foreground">No other groups</div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <button
+                                    onClick={handleBatchDelete}
+                                    className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                                >
+                                    <Trash2 size={14} />
+                                    Delete
+                                </button>
+
+                                <div className="flex-1" />
+
+                                <button
+                                    onClick={() => handleSelectAll(false)}
+                                    className="px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                >
+                                    Clear
+                                </button>
+                            </div>
+                        )}
+
                         <div className="relative w-full">
                             <input
                                 type="text"
@@ -789,7 +909,20 @@ Output only the keywords:`
                     <table className="w-full text-sm text-left table-fixed">
                         <thead className="text-xs text-muted-foreground uppercase bg-neutral-50 dark:bg-neutral-900 sticky top-0 z-10">
                             <tr>
-                                <th className="px-2 py-3 font-medium w-[40px] text-center">#</th>
+                                <th className="px-2 py-3 font-medium w-[50px] text-center">
+                                    <div className="flex items-center justify-center gap-1">
+                                        <div className="relative flex items-center">
+                                            <input
+                                                type="checkbox"
+                                                checked={filteredResults.length > 0 && filteredResults.every(r => selectedPaperIds.has(r.id))}
+                                                onChange={(e) => handleSelectAll(e.target.checked)}
+                                                className="peer h-3.5 w-3.5 cursor-pointer appearance-none rounded-sm border border-neutral-300 dark:border-neutral-600 checked:bg-blue-600 checked:border-blue-600 focus:ring-1 focus:ring-blue-500/20"
+                                            />
+                                            <Check size={10} className="absolute left-[2px] top-[2px] text-white opacity-0 peer-checked:opacity-100 pointer-events-none" strokeWidth={3} />
+                                        </div>
+                                        <span>#</span>
+                                    </div>
+                                </th>
                                 <th className="px-4 py-3 font-medium w-[200px]">Article Details</th>
                                 <th className="px-2 py-3 font-medium w-[60px]">Metrics</th>
                                 <th className="px-4 py-3 font-medium w-[250px]">Analysis (Abstract & Method)</th>
@@ -798,24 +931,24 @@ Output only the keywords:`
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-border/40">
-                            {results.filter(
-                                article =>
-                                    !query ||
-                                    article.title.toLowerCase().includes(query.toLowerCase()) ||
-                                    (article.authors && article.authors.toLowerCase().includes(query.toLowerCase())) ||
-                                    (article.keywords && article.keywords.toLowerCase().includes(query.toLowerCase())) ||
-                                    (article.source && article.source.toLowerCase().includes(query.toLowerCase())) ||
-                                    (article.year && String(article.year).includes(query)) ||
-                                    (article.doi && article.doi.toLowerCase().includes(query.toLowerCase())) ||
-                                    (article.abstract && article.abstract.toLowerCase().includes(query.toLowerCase())) ||
-                                    (article.methodology && article.methodology.toLowerCase().includes(query.toLowerCase()))
-                            ).map((article, index) => (
+                            {filteredResults.map((article, index) => (
                                 <tr key={article.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-900/50 group">
                                     {/* Row Number */}
-                                    <td className="px-2 py-3 align-top text-center w-[40px]">
-                                        <span className="inline-flex items-center justify-center w-6 h-6 bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 rounded-full text-xs font-bold">
-                                            {index + 1}
-                                        </span>
+                                    <td className="px-2 py-3 align-top text-center w-[50px]">
+                                        <div className="flex flex-col items-center gap-2">
+                                            <div className="relative flex items-center">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedPaperIds.has(article.id)}
+                                                    onChange={(e) => handleSelectPaper(article.id, e.target.checked)}
+                                                    className="peer h-3.5 w-3.5 cursor-pointer appearance-none rounded-sm border border-neutral-300 dark:border-neutral-600 checked:bg-blue-600 checked:border-blue-600 focus:ring-1 focus:ring-blue-500/20"
+                                                />
+                                                <Check size={10} className="absolute left-[2px] top-[2px] text-white opacity-0 peer-checked:opacity-100 pointer-events-none" strokeWidth={3} />
+                                            </div>
+                                            <span className="inline-flex items-center justify-center w-5 h-5 bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 rounded-full text-[10px] font-bold">
+                                                {index + 1}
+                                            </span>
+                                        </div>
                                     </td>
                                     <td className="px-4 py-3 align-top w-[200px]">
                                         <div className="font-medium text-foreground mb-1 leading-snug md:text-base selection:bg-blue-100 dark:selection:bg-blue-900" title={article.title}>

@@ -8,7 +8,7 @@ interface SearchConfig {
     originalMessage: string;
     languages?: string[];
     dateRange?: { start: number; end: number };
-    targetGroupId?: string; // 目標群組 ID
+    targetGroupIds?: string[]; // 目標群組 IDs (多選)
     newGroupName?: string; // 如果創建新群組
 }
 
@@ -20,16 +20,16 @@ interface ResearchGroup {
 
 // 可選語言列表
 const LANGUAGE_OPTIONS = [
-    { id: 'en', name: 'English', flag: '🇺🇸', nativeName: 'English' },
-    { id: 'zh-TW', name: '繁體中文', flag: '🇹🇼', nativeName: '繁體中文' },
-    { id: 'zh-CN', name: '简体中文', flag: '🇨🇳', nativeName: '简体中文' },
-    { id: 'ja', name: '日本語', flag: '🇯🇵', nativeName: '日本語' },
-    { id: 'ko', name: '한국어', flag: '🇰🇷', nativeName: '한국어' },
-    { id: 'de', name: 'German', flag: '🇩🇪', nativeName: 'Deutsch' },
-    { id: 'fr', name: 'French', flag: '🇫🇷', nativeName: 'Français' },
-    { id: 'es', name: 'Spanish', flag: '🇪🇸', nativeName: 'Español' },
-    { id: 'pt', name: 'Portuguese', flag: '🇵🇹', nativeName: 'Português' },
-    { id: 'ru', name: 'Russian', flag: '🇷🇺', nativeName: 'Русский' },
+    { id: 'en', name: 'English', flag: 'US', nativeName: 'English' }, // Removed emoji flags, will use Lucide icons maybe or just text/svg later
+    { id: 'zh-TW', name: '繁體中文', flag: 'TW', nativeName: '繁體中文' },
+    { id: 'zh-CN', name: '简体中文', flag: 'CN', nativeName: '简体中文' },
+    { id: 'ja', name: '日本語', flag: 'JP', nativeName: '日本語' },
+    { id: 'ko', name: '한국어', flag: 'KR', nativeName: '한국어' },
+    { id: 'de', name: 'German', flag: 'DE', nativeName: 'Deutsch' },
+    { id: 'fr', name: 'French', flag: 'FR', nativeName: 'Français' },
+    { id: 'es', name: 'Spanish', flag: 'ES', nativeName: 'Español' },
+    { id: 'pt', name: 'Portuguese', flag: 'PT', nativeName: 'Português' },
+    { id: 'ru', name: 'Russian', flag: 'RU', nativeName: 'Русский' },
 ];
 
 interface SearchConfirmationMessageProps {
@@ -52,8 +52,8 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
     const [selectedLanguages, setSelectedLanguages] = useState<string[]>(['en']);
     const [showLanguageDropdown, setShowLanguageDropdown] = useState(false);
 
-    // 群組選擇狀態
-    const [selectedGroupId, setSelectedGroupId] = useState<string | null>(currentGroupId || null);
+    // 群組選擇狀態 - 改為多選
+    const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(currentGroupId ? [currentGroupId] : []);
     const [showGroupDropdown, setShowGroupDropdown] = useState(false);
     const [isCreatingNewGroup, setIsCreatingNewGroup] = useState(false);
     const [newGroupName, setNewGroupName] = useState('');
@@ -72,13 +72,27 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
     };
 
     // 獲取選中群組的名稱
-    const getSelectedGroupName = () => {
-        if (isCreatingNewGroup && newGroupName) return `📁 ${newGroupName} (New)`;
-        if (selectedGroupId) {
-            const group = groups.find(g => g.id === selectedGroupId);
-            return group ? `📁 ${group.name}` : 'Select Group';
+    const getSelectedGroupsDisplay = () => {
+        if (isCreatingNewGroup && newGroupName) return `${newGroupName} (New)`;
+        if (selectedGroupIds.length > 0) {
+            if (selectedGroupIds.length === 1) {
+                const group = groups.find(g => g.id === selectedGroupIds[0]);
+                return group ? group.name : 'Select Groups';
+            }
+            return `${selectedGroupIds.length} Groups Selected`;
         }
-        return 'Select Target Group';
+        return 'Select Target Groups';
+    };
+
+    const toggleGroupSelection = (groupId: string) => {
+        setSelectedGroupIds(prev => {
+            if (prev.includes(groupId)) {
+                return prev.filter(id => id !== groupId);
+            } else {
+                return [...prev, groupId];
+            }
+        });
+        setIsCreatingNewGroup(false);
     };
 
     const handleConfirm = () => {
@@ -90,7 +104,7 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
             geminiCount,
             dateRange: { start: startYear, end: endYear },
             languages: selectedLanguages,
-            targetGroupId: isCreatingNewGroup ? undefined : selectedGroupId || undefined,
+            targetGroupIds: isCreatingNewGroup ? undefined : (selectedGroupIds.length > 0 ? selectedGroupIds : undefined),
             newGroupName: isCreatingNewGroup ? newGroupName : undefined
         } as any);
     };
@@ -102,8 +116,8 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
             const lang = LANGUAGE_OPTIONS.find(l => l.id === selectedLanguages[0]);
             return lang ? `${lang.flag} ${lang.name}` : 'Select Languages';
         }
-        const flags = selectedLanguages.map(id => LANGUAGE_OPTIONS.find(l => l.id === id)?.flag).join('');
-        return `${flags} ${selectedLanguages.length} languages`;
+        // Use text flags or just count
+        return `${selectedLanguages.length} Languages`;
     };
 
     if (isConfirmed) {
@@ -225,7 +239,7 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                                         className={`w-full px-3 py-2 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2 transition-colors ${selectedLanguages.includes(lang.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                                             }`}
                                     >
-                                        <span className="text-base">{lang.flag}</span>
+                                        <span className="text-xs font-mono bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded text-muted-foreground">{lang.flag}</span>
                                         <span className="flex-1">{lang.name}</span>
                                         {selectedLanguages.includes(lang.id) && (
                                             <Check size={14} className="text-blue-600" />
@@ -247,7 +261,7 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                     <div className="space-y-1.5">
                         <label className="text-xs font-medium text-muted-foreground ml-1 flex items-center gap-1">
                             <Folder size={12} />
-                            Target Group
+                            Target Groups
                         </label>
                         <div className="relative">
                             <button
@@ -258,7 +272,10 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                                 }}
                                 className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-800 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all flex items-center justify-between"
                             >
-                                <span className="font-medium truncate">{getSelectedGroupName()}</span>
+                                <span className="font-medium truncate flex items-center gap-2">
+                                    <Folder size={14} className="text-blue-500" />
+                                    {getSelectedGroupsDisplay()}
+                                </span>
                                 <ChevronDown size={14} className={`transition-transform shrink-0 ${showGroupDropdown ? 'rotate-180' : ''}`} />
                             </button>
 
@@ -269,18 +286,14 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                                         <button
                                             key={group.id}
                                             type="button"
-                                            onClick={() => {
-                                                setSelectedGroupId(group.id);
-                                                setIsCreatingNewGroup(false);
-                                                setShowGroupDropdown(false);
-                                            }}
-                                            className={`w-full px-3 py-2 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2 transition-colors ${selectedGroupId === group.id && !isCreatingNewGroup ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+                                            onClick={() => toggleGroupSelection(group.id)}
+                                            className={`w-full px-3 py-2 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2 transition-colors ${selectedGroupIds.includes(group.id) && !isCreatingNewGroup ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
                                         >
+                                            <div className={`w-4 h-4 rounded border flex items-center justify-center ${selectedGroupIds.includes(group.id) ? 'bg-blue-500 border-blue-500' : 'border-neutral-400'}`}>
+                                                {selectedGroupIds.includes(group.id) && <Check size={10} className="text-white" />}
+                                            </div>
                                             <Folder size={14} className="text-blue-600 shrink-0" />
                                             <span className="flex-1 truncate">{group.name}</span>
-                                            {selectedGroupId === group.id && !isCreatingNewGroup && (
-                                                <Check size={14} className="text-blue-600 shrink-0" />
-                                            )}
                                         </button>
                                     ))}
 
@@ -290,7 +303,7 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                                             type="button"
                                             onClick={() => {
                                                 setIsCreatingNewGroup(true);
-                                                setSelectedGroupId(null);
+                                                setSelectedGroupIds([]);
                                                 setShowGroupDropdown(false);
                                             }}
                                             className={`w-full px-3 py-2 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2 transition-colors text-green-600 dark:text-green-400 ${isCreatingNewGroup ? 'bg-green-50 dark:bg-green-900/20' : ''}`}
