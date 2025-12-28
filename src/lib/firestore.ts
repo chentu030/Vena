@@ -1333,3 +1333,35 @@ export const updateUserKarma = async (userId: string, postKarmaDelta: number, co
         });
     }
 };
+
+// User Profile (Settings)
+export interface UserProfile {
+    uid: string;
+    displayName: string;
+    email: string;
+    photoURL?: string;
+    bio?: string;
+    jobTitle?: string;
+    organization?: string;
+    website?: string;
+
+    // Preferences
+    language?: 'en' | 'zh' | 'es' | 'fr' | 'de' | 'ja';
+    themePreference?: 'system' | 'light' | 'dark';
+    backgroundIntensity?: number; // 0-100
+}
+
+export const getUserProfile = async (uid: string): Promise<UserProfile | null> => {
+    const docRef = doc(db, 'users', uid);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+        return docSnap.data() as UserProfile;
+    }
+    return null;
+};
+
+export const updateUserProfile = async (uid: string, data: Partial<UserProfile>) => {
+    const docRef = doc(db, 'users', uid);
+    // Use setDoc with merge: true to create if not exists
+    await setDoc(docRef, { ...data, uid }, { merge: true });
+};
