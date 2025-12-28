@@ -1005,3 +1005,298 @@ export const clearAiChatHistory = async (userId: string, teamId: string, fileId:
     snapshot.docs.forEach(doc => batch.delete(doc.ref));
     await batch.commit();
 };
+
+// ==================== COMMUNITY FEATURES ====================
+
+export interface Community {
+    id: string;
+    name: string;
+    displayName: string;
+    description: string;
+    icon?: string;
+    bannerUrl?: string;
+    createdBy: string;
+    createdAt: any;
+    memberCount: number;
+    rules?: string[];
+    tags?: string[];
+}
+
+export interface CommunityPost {
+    id: string;
+    communityId: string;
+    communityName: string;
+    title: string;
+    content: string;
+    type: 'text' | 'link' | 'paper' | 'image';
+    linkUrl?: string;
+    imageUrl?: string;
+    paperDoi?: string;
+    authorId: string;
+    authorName: string;
+    authorEmail: string;
+    upvotes: string[]; // Array of user IDs
+    downvotes: string[];
+    commentCount: number;
+    createdAt: any;
+    updatedAt: any;
+}
+
+export interface PostComment {
+    id: string;
+    postId: string;
+    parentId: string | null; // For nested comments
+    content: string;
+    authorId: string;
+    authorName: string;
+    upvotes: string[];
+    downvotes: string[];
+    createdAt: any;
+    depth: number;
+}
+
+export interface UserKarma {
+    postKarma: number;
+    commentKarma: number;
+    updatedAt: any;
+}
+
+// Community CRUD
+export const createCommunity = async (community: Omit<Community, 'id' | 'createdAt' | 'memberCount'>) => {
+    const docRef = doc(collection(db, 'communities'));
+    await setDoc(docRef, {
+        ...community,
+        id: docRef.id,
+        memberCount: 1,
+        createdAt: Timestamp.now()
+    });
+    return docRef.id;
+};
+
+export const getCommunities = async (): Promise<Community[]> => {
+    const q = query(collection(db, 'communities'), orderBy('memberCount', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Community));
+};
+
+export const getCommunity = async (communityId: string): Promise<Community | null> => {
+    const docRef = doc(db, 'communities', communityId);
+    const docSnap = await getDoc(docRef);
+    return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } as Community : null;
+};
+
+export const subscribeToCommunities = (callback: (communities: Community[]) => void) => {
+    const q = query(collection(db, 'communities'), orderBy('memberCount', 'desc'));
+    return onSnapshot(q, (snapshot) => {
+        callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Community)));
+    });
+};
+
+// Post CRUD
+export const createPost = async (post: Omit<CommunityPost, 'id' | 'createdAt' | 'updatedAt' | 'upvotes' | 'downvotes' | 'commentCount'>) => {
+    const docRef = doc(collection(db, 'posts'));
+    await setDoc(docRef, {
+        ...post,
+        id: docRef.id,
+        upvotes: [post.authorId], // Auto-upvote own post
+        downvotes: [],
+        commentCount: 0,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now()
+    });
+    // Update user karma
+    await updateUserKarma(post.authorId, 1, 0);
+    return docRef.id;
+};
+
+export const getPosts = async (communityId?: string, sortBy: 'hot' | 'new' | 'top' = 'hot'): Promise<CommunityPost[]> => {
+    let q;
+    if (communityId) {
+        q = query(collection(db, 'posts'), where('communityId', '==', communityId), orderBy('createdAt', 'desc'));
+    } else {
+        q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'));
+    }
+    const snapshot = await getDocs(q);
+    let posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CommunityPost));
+
+    // Sort by algorithm
+    if (sortBy === 'hot') {
+        posts = posts.sort((a, b) => {
+            const scoreA = (a.upvotes.length - a.downvotes.length) / Math.pow((Date.now() - a.createdAt?.toDate?.()?.getTime?.() || 0) / 3600000 + 2, 1.8);
+            const scoreB = (b.upvotes.length - b.downvotes.length) / Math.pow((Date.now() - b.createdAt?.toDate?.()?.getTime?.() || 0) / 3600000 + 2, 1.8);
+            return scoreB - scoreA;
+        });
+    } else if (sortBy === 'top') {
+        posts = posts.sort((a, b) => (b.upvotes.length - b.downvotes.length) - (a.upvotes.length - a.downvotes.length));
+    }
+
+    return posts;
+};
+
+export const subscribeToPosts = (callback: (posts: CommunityPost[]) => void, communityId?: string) => {
+    let q;
+    if (communityId) {
+        q = query(collection(db, 'posts'), where('communityId', '==', communityId), orderBy('createdAt', 'desc'));
+    } else {
+        q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'));
+    }
+    return onSnapshot(q, (snapshot) => {
+        callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CommunityPost)));
+    });
+};
+
+export const getPost = async (postId: string): Promise<CommunityPost | null> => {
+    const docRef = doc(db, 'posts', postId);
+    const docSnap = await getDoc(docRef);
+    return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } as CommunityPost : null;
+};
+
+export const votePost = async (postId: string, odId: string, voteType: 'up' | 'down') => {
+    const docRef = doc(db, 'posts', postId);
+    const docSnap = await getDoc(docRef);
+    if (!docSnap.exists()) return;
+
+    const post = docSnap.data() as CommunityPost;
+    let newUpvotes = [...post.upvotes];
+    let newDownvotes = [...post.downvotes];
+    let karmaChange = 0;
+
+    if (voteType === 'up') {
+        if (newUpvotes.includes(odId)) {
+            newUpvotes = newUpvotes.filter(id => id !== odId);
+            karmaChange = -1;
+        } else {
+            newUpvotes.push(odId);
+            karmaChange = 1;
+            if (newDownvotes.includes(odId)) {
+                newDownvotes = newDownvotes.filter(id => id !== odId);
+                karmaChange = 2;
+            }
+        }
+    } else {
+        if (newDownvotes.includes(odId)) {
+            newDownvotes = newDownvotes.filter(id => id !== odId);
+            karmaChange = 1;
+        } else {
+            newDownvotes.push(odId);
+            karmaChange = -1;
+            if (newUpvotes.includes(odId)) {
+                newUpvotes = newUpvotes.filter(id => id !== odId);
+                karmaChange = -2;
+            }
+        }
+    }
+
+    await updateDoc(docRef, { upvotes: newUpvotes, downvotes: newDownvotes });
+    await updateUserKarma(post.authorId, karmaChange, 0);
+};
+
+export const deletePost = async (postId: string) => {
+    await deleteDoc(doc(db, 'posts', postId));
+};
+
+// Comment CRUD
+export const createComment = async (comment: Omit<PostComment, 'id' | 'createdAt' | 'upvotes' | 'downvotes'>) => {
+    const docRef = doc(collection(db, 'comments'));
+    await setDoc(docRef, {
+        ...comment,
+        id: docRef.id,
+        upvotes: [comment.authorId],
+        downvotes: [],
+        createdAt: Timestamp.now()
+    });
+
+    // Update post comment count
+    const postRef = doc(db, 'posts', comment.postId);
+    const postSnap = await getDoc(postRef);
+    if (postSnap.exists()) {
+        await updateDoc(postRef, { commentCount: (postSnap.data().commentCount || 0) + 1 });
+    }
+
+    // Update karma
+    await updateUserKarma(comment.authorId, 0, 1);
+    return docRef.id;
+};
+
+export const getComments = async (postId: string): Promise<PostComment[]> => {
+    const q = query(collection(db, 'comments'), where('postId', '==', postId), orderBy('createdAt', 'asc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PostComment));
+};
+
+export const subscribeToComments = (postId: string, callback: (comments: PostComment[]) => void) => {
+    const q = query(collection(db, 'comments'), where('postId', '==', postId), orderBy('createdAt', 'asc'));
+    return onSnapshot(q, (snapshot) => {
+        callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PostComment)));
+    });
+};
+
+export const voteComment = async (commentId: string, odId: string, voteType: 'up' | 'down') => {
+    const docRef = doc(db, 'comments', commentId);
+    const docSnap = await getDoc(docRef);
+    if (!docSnap.exists()) return;
+
+    const comment = docSnap.data() as PostComment;
+    let newUpvotes = [...comment.upvotes];
+    let newDownvotes = [...comment.downvotes];
+    let karmaChange = 0;
+
+    if (voteType === 'up') {
+        if (newUpvotes.includes(odId)) {
+            newUpvotes = newUpvotes.filter(id => id !== odId);
+            karmaChange = -1;
+        } else {
+            newUpvotes.push(odId);
+            karmaChange = 1;
+            if (newDownvotes.includes(odId)) {
+                newDownvotes = newDownvotes.filter(id => id !== odId);
+                karmaChange = 2;
+            }
+        }
+    } else {
+        if (newDownvotes.includes(odId)) {
+            newDownvotes = newDownvotes.filter(id => id !== odId);
+            karmaChange = 1;
+        } else {
+            newDownvotes.push(odId);
+            karmaChange = -1;
+            if (newUpvotes.includes(odId)) {
+                newUpvotes = newUpvotes.filter(id => id !== odId);
+                karmaChange = -2;
+            }
+        }
+    }
+
+    await updateDoc(docRef, { upvotes: newUpvotes, downvotes: newDownvotes });
+    await updateUserKarma(comment.authorId, 0, karmaChange);
+};
+
+// User Karma
+export const getUserKarma = async (userId: string): Promise<UserKarma> => {
+    const docRef = doc(db, 'userKarma', userId);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+        return docSnap.data() as UserKarma;
+    }
+    return { postKarma: 0, commentKarma: 0, updatedAt: null };
+};
+
+export const updateUserKarma = async (userId: string, postKarmaDelta: number, commentKarmaDelta: number) => {
+    const docRef = doc(db, 'userKarma', userId);
+    const docSnap = await getDoc(docRef);
+
+    if (docSnap.exists()) {
+        const current = docSnap.data() as UserKarma;
+        await updateDoc(docRef, {
+            postKarma: current.postKarma + postKarmaDelta,
+            commentKarma: current.commentKarma + commentKarmaDelta,
+            updatedAt: Timestamp.now()
+        });
+    } else {
+        await setDoc(docRef, {
+            postKarma: postKarmaDelta,
+            commentKarma: commentKarmaDelta,
+            updatedAt: Timestamp.now()
+        });
+    }
+};
