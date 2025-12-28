@@ -14,6 +14,7 @@ export interface ResearchGroup {
     name: string;
     papers: ResearchArticle[];
     driveFolderId?: string;
+    updatedAt?: string;
 }
 
 interface ResearchPanelProps {

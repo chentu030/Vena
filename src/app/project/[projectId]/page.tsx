@@ -11,7 +11,7 @@ import MindMap from '@/components/MindMap';
 import SystemMapPanel from '@/components/SystemMapPanel';
 import HistorySidebar from '@/components/HistorySidebar';
 import MainEditor from '@/components/MainEditor';
-import ResearchPanel from '@/components/ResearchPanel';
+import ResearchPanel, { ResearchGroup, ResearchArticle } from '@/components/ResearchPanel';
 import { PaperProvider } from '@/context/PaperContext';
 import { useAuth } from '@/lib/auth';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
@@ -1564,17 +1564,17 @@ Rules:
         }
     };
 
-    const handleMovePapers = async (papers: any[], targetGroupId: string) => {
+    const handleMovePapers = async (papers: ResearchArticle[], targetGroupId: string) => {
         if (!user || !projectId) return;
 
-        setResearchGroups(prev => {
-            const newGroups = prev.map(g => ({ ...g, papers: [...g.papers] })); // Deep copy structure
-            const targetG = newGroups.find(g => g.id === targetGroupId);
+        setResearchGroups((prev: ResearchGroup[]) => {
+            const newGroups = prev.map((g: ResearchGroup) => ({ ...g, papers: [...g.papers] })); // Deep copy structure
+            const targetG = newGroups.find((g: ResearchGroup) => g.id === targetGroupId);
             if (!targetG) return prev;
 
             // Add papers to target group (avoiding duplicates)
-            const existingIds = new Set(targetG.papers.map(p => p.id));
-            papers.forEach(p => {
+            const existingIds = new Set(targetG.papers.map((p: ResearchArticle) => p.id));
+            papers.forEach((p: ResearchArticle) => {
                 if (!existingIds.has(p.id)) {
                     targetG.papers.push(p);
                 }
@@ -1583,9 +1583,9 @@ Rules:
 
             // Remove from current group (if currentGroupId is set)
             if (currentGroupId && currentGroupId !== targetGroupId) {
-                const currentG = newGroups.find(g => g.id === currentGroupId);
+                const currentG = newGroups.find((g: ResearchGroup) => g.id === currentGroupId);
                 if (currentG) {
-                    currentG.papers = currentG.papers.filter(p => !papers.some(moved => moved.id === p.id));
+                    currentG.papers = currentG.papers.filter((p: ResearchArticle) => !papers.some((moved: ResearchArticle) => moved.id === p.id));
                     currentG.updatedAt = new Date().toISOString();
                 }
             }
@@ -1594,7 +1594,7 @@ Rules:
             saveDocument(user.uid, 'researchGroups', targetG, projectId);
 
             if (currentGroupId && currentGroupId !== targetGroupId) {
-                const currentG = newGroups.find(g => g.id === currentGroupId);
+                const currentG = newGroups.find((g: ResearchGroup) => g.id === currentGroupId);
                 if (currentG) saveDocument(user.uid, 'researchGroups', currentG, projectId);
             }
 
@@ -1603,7 +1603,7 @@ Rules:
 
         // Update current results if we are viewing the source group
         if (currentGroupId && currentGroupId !== targetGroupId) {
-            setCurrentResearchResults(prev => prev.filter(p => !papers.some(moved => moved.id === p.id)));
+            setCurrentResearchResults((prev: ResearchArticle[]) => prev.filter((p: ResearchArticle) => !papers.some((moved: ResearchArticle) => moved.id === p.id)));
         }
     };
 
