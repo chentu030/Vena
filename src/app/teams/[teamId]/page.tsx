@@ -1565,7 +1565,7 @@ export default function TeamDetailPage() {
                                                                                 className="cursor-pointer mt-2 rounded-lg overflow-hidden border border-border hover:shadow-md transition-shadow"
                                                                             >
                                                                                 <div className="h-32 bg-neutral-100 dark:bg-neutral-800 relative group">
-                                                                                    <PdfThumbnail url={att.url} />
+                                                                                    <PdfThumbnail url={att.url} thumbnailUrl={att.thumbnailUrl} />
                                                                                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
                                                                                         <Eye size={24} className="text-white drop-shadow-lg" />
                                                                                     </div>
