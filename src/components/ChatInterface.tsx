@@ -293,6 +293,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, onSendMessage, 
                                     config={JSON.parse(msg.content)}
                                     onConfirm={onConfirmSearch}
                                     onCancel={onCancelSearch || (() => { })}
+                                    groups={researchGroups}
+                                    currentGroupId={currentGroupId}
                                 />
                             </div>
                         ) : (

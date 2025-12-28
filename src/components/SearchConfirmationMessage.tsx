@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, MessageSquare, X, ArrowRight, Globe, Check, ChevronDown } from 'lucide-react';
+import { Search, MessageSquare, X, ArrowRight, Globe, Check, ChevronDown, FolderPlus, Folder } from 'lucide-react';
 
 interface SearchConfig {
     keywords: string;
@@ -8,6 +8,14 @@ interface SearchConfig {
     originalMessage: string;
     languages?: string[];
     dateRange?: { start: number; end: number };
+    targetGroupId?: string; // 目標群組 ID
+    newGroupName?: string; // 如果創建新群組
+}
+
+// 群組資料結構
+interface ResearchGroup {
+    id: string;
+    name: string;
 }
 
 // 可選語言列表
@@ -28,9 +36,11 @@ interface SearchConfirmationMessageProps {
     config: SearchConfig;
     onConfirm: (config: SearchConfig) => void;
     onCancel: (config: SearchConfig, chatOnly?: boolean) => void;
+    groups?: ResearchGroup[]; // 可用的群組列表
+    currentGroupId?: string | null; // 當前選中的群組
 }
 
-const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ config, onConfirm, onCancel }) => {
+const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ config, onConfirm, onCancel, groups = [], currentGroupId }) => {
     const [keywords, setKeywords] = useState(config.keywords);
     const [scopusCount, setScopusCount] = useState(config.scopusCount);
     const [geminiCount, setGeminiCount] = useState(config.geminiCount);
@@ -41,6 +51,12 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
     // 語言選擇狀態 - 預設選擇英文
     const [selectedLanguages, setSelectedLanguages] = useState<string[]>(['en']);
     const [showLanguageDropdown, setShowLanguageDropdown] = useState(false);
+
+    // 群組選擇狀態
+    const [selectedGroupId, setSelectedGroupId] = useState<string | null>(currentGroupId || null);
+    const [showGroupDropdown, setShowGroupDropdown] = useState(false);
+    const [isCreatingNewGroup, setIsCreatingNewGroup] = useState(false);
+    const [newGroupName, setNewGroupName] = useState('');
 
     // 切換語言選擇
     const toggleLanguage = (langId: string) => {
@@ -55,6 +71,16 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
         });
     };
 
+    // 獲取選中群組的名稱
+    const getSelectedGroupName = () => {
+        if (isCreatingNewGroup && newGroupName) return `📁 ${newGroupName} (New)`;
+        if (selectedGroupId) {
+            const group = groups.find(g => g.id === selectedGroupId);
+            return group ? `📁 ${group.name}` : 'Select Group';
+        }
+        return 'Select Target Group';
+    };
+
     const handleConfirm = () => {
         setIsConfirmed(true);
         onConfirm({
@@ -63,7 +89,9 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
             scopusCount,
             geminiCount,
             dateRange: { start: startYear, end: endYear },
-            languages: selectedLanguages
+            languages: selectedLanguages,
+            targetGroupId: isCreatingNewGroup ? undefined : selectedGroupId || undefined,
+            newGroupName: isCreatingNewGroup ? newGroupName : undefined
         } as any);
     };
 
@@ -213,6 +241,81 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                         </p>
                     )}
                 </div>
+
+                {/* Group Selection */}
+                {groups.length > 0 && (
+                    <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-muted-foreground ml-1 flex items-center gap-1">
+                            <Folder size={12} />
+                            Target Group
+                        </label>
+                        <div className="relative">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowGroupDropdown(!showGroupDropdown);
+                                    setShowLanguageDropdown(false);
+                                }}
+                                className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-800 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all flex items-center justify-between"
+                            >
+                                <span className="font-medium truncate">{getSelectedGroupName()}</span>
+                                <ChevronDown size={14} className={`transition-transform shrink-0 ${showGroupDropdown ? 'rotate-180' : ''}`} />
+                            </button>
+
+                            {showGroupDropdown && (
+                                <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-neutral-800 border border-border rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
+                                    {/* Existing Groups */}
+                                    {groups.map((group) => (
+                                        <button
+                                            key={group.id}
+                                            type="button"
+                                            onClick={() => {
+                                                setSelectedGroupId(group.id);
+                                                setIsCreatingNewGroup(false);
+                                                setShowGroupDropdown(false);
+                                            }}
+                                            className={`w-full px-3 py-2 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2 transition-colors ${selectedGroupId === group.id && !isCreatingNewGroup ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+                                        >
+                                            <Folder size={14} className="text-blue-600 shrink-0" />
+                                            <span className="flex-1 truncate">{group.name}</span>
+                                            {selectedGroupId === group.id && !isCreatingNewGroup && (
+                                                <Check size={14} className="text-blue-600 shrink-0" />
+                                            )}
+                                        </button>
+                                    ))}
+
+                                    {/* Create New Group Option */}
+                                    <div className="border-t border-border">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setIsCreatingNewGroup(true);
+                                                setSelectedGroupId(null);
+                                                setShowGroupDropdown(false);
+                                            }}
+                                            className={`w-full px-3 py-2 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2 transition-colors text-green-600 dark:text-green-400 ${isCreatingNewGroup ? 'bg-green-50 dark:bg-green-900/20' : ''}`}
+                                        >
+                                            <FolderPlus size={14} className="shrink-0" />
+                                            <span className="flex-1">Create New Group...</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* New Group Name Input */}
+                        {isCreatingNewGroup && (
+                            <input
+                                type="text"
+                                value={newGroupName}
+                                onChange={(e) => setNewGroupName(e.target.value)}
+                                placeholder="Enter new group name..."
+                                className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-800 border border-green-500 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 transition-all mt-1"
+                                autoFocus
+                            />
+                        )}
+                    </div>
+                )}
 
                 {/* Original Request Preview */}
                 <div className="bg-neutral-50 dark:bg-neutral-800 rounded-lg p-3 text-xs text-muted-foreground border border-border/50">

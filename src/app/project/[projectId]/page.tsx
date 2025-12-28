@@ -27,7 +27,9 @@ interface SearchConfig {
     queries?: string[];
     originalMessage: string;
     dateRange?: { start: number; end: number };
-    languages?: string[];  // 新增：選擇的搜索語言
+    languages?: string[];  // 選擇的搜索語言
+    targetGroupId?: string; // 目標群組 ID
+    newGroupName?: string; // 如果創建新群組
 }
 
 export default function ProjectWorkspace() {
@@ -245,6 +247,27 @@ export default function ProjectWorkspace() {
 
         setSidebarView('research'); // Switch to research tab
 
+        // 處理群組選擇
+        if (config.newGroupName && user && projectId) {
+            // 創建新群組
+            const newGroup = {
+                id: `group-${Date.now()}`,
+                name: config.newGroupName,
+                papers: [],
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            };
+            setResearchGroups(prev => [newGroup, ...prev]);
+            setCurrentGroupId(newGroup.id);
+            setCurrentResearchResults([]);
+            saveDocument(user.uid, 'researchGroups', newGroup, projectId);
+        } else if (config.targetGroupId && config.targetGroupId !== currentGroupId) {
+            // 切換到選擇的群組
+            setCurrentGroupId(config.targetGroupId);
+            const group = researchGroups.find(g => g.id === config.targetGroupId);
+            setCurrentResearchResults(group?.papers || []);
+        }
+
         // 語言配置映射
         const LANGUAGE_MAP: Record<string, { name: string; translateName: string }> = {
             'en': { name: 'English', translateName: 'English' },
@@ -262,7 +285,14 @@ export default function ProjectWorkspace() {
         const selectedLanguages = config.languages || ['en'];
         const languageNames = selectedLanguages.map(id => LANGUAGE_MAP[id]?.name || id).join(', ');
 
-        const newMessages = [...messages, { role: 'system', content: `🔍 Starting multi-language literature search for: "${config.keywords}" in ${languageNames} (${config.scopusCount} Scopus, ${config.geminiCount} Gemini)...` }];
+        // 顯示群組資訊
+        const groupInfo = config.newGroupName
+            ? ` → New group: "${config.newGroupName}"`
+            : config.targetGroupId
+                ? ` → Group: "${researchGroups.find(g => g.id === config.targetGroupId)?.name || 'Selected'}"`
+                : '';
+
+        const newMessages = [...messages, { role: 'system', content: `🔍 Starting multi-language literature search for: "${config.keywords}" in ${languageNames} (${config.scopusCount} Scopus, ${config.geminiCount} Gemini)...${groupInfo}` }];
         setMessages(newMessages);
 
         // Start Abort Controller
