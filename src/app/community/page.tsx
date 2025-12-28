@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     ArrowBigUp, ArrowBigDown, MessageSquare, Share2, Bookmark,
     Plus, TrendingUp, Clock, Award, ChevronDown, Users, Search,
-    X, Link as LinkIcon, FileText, Image as ImageIcon, Loader2, Sparkles, Flame, Shield, Globe, UploadCloud, File, Trash2
+    X, Link as LinkIcon, FileText, Image as ImageIcon, Loader2, Sparkles, Flame, Shield, Globe, UploadCloud, File, Trash2, Mic, Paperclip
 } from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
 import { useAuth } from '@/lib/auth';
@@ -39,8 +39,10 @@ export default function CommunityPage() {
     const [postLink, setPostLink] = useState('');
     const [postCommunity, setPostCommunity] = useState('');
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    const [filePreview, setFilePreview] = useState<string | null>(null); // For image preview
     const [isSubmitting, setIsSubmitting] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [activeAttachment, setActiveAttachment] = useState<'none' | 'image' | 'file' | 'link'>('none');
 
     // Create Community Form
     const [communityName, setCommunityName] = useState('');
@@ -92,8 +94,39 @@ export default function CommunityPage() {
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
-            setSelectedFile(e.target.files[0]);
+            const file = e.target.files[0];
+            setSelectedFile(file);
+
+            if (file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    setFilePreview(reader.result as string);
+                };
+                reader.readAsDataURL(file);
+                setPostType('image');
+                setActiveAttachment('image');
+            } else if (file.type === 'application/pdf') {
+                setFilePreview(null);
+                setPostType('paper');
+                setActiveAttachment('file');
+            }
         }
+    };
+
+    const triggerFileSelect = (type: 'image' | 'file') => {
+        if (fileInputRef.current) {
+            fileInputRef.current.accept = type === 'image' ? "image/*" : "application/pdf";
+            fileInputRef.current.click();
+        }
+    };
+
+    const removeAttachment = () => {
+        setSelectedFile(null);
+        setFilePreview(null);
+        setPostLink('');
+        setActiveAttachment('none');
+        setPostType('text');
+        if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
     const handleCreatePost = async () => {
@@ -118,6 +151,11 @@ export default function CommunityPage() {
                 }
             }
 
+            // If link mode is active, ensure postType is 'link'
+            if (activeAttachment === 'link' && postLink) {
+                // postType is already set? ensure consistency
+            }
+
             await createPost({
                 communityId: postCommunity,
                 communityName: community?.displayName || community?.name || 'general',
@@ -136,6 +174,8 @@ export default function CommunityPage() {
             setPostLink('');
             setPostType('text');
             setSelectedFile(null);
+            setFilePreview(null);
+            setActiveAttachment('none');
         } catch (error) {
             console.error('Failed to create post:', error);
         } finally {
@@ -501,138 +541,153 @@ export default function CommunityPage() {
                             initial={{ scale: 0.95, opacity: 0, y: 20 }}
                             animate={{ scale: 1, opacity: 1, y: 0 }}
                             exit={{ scale: 0.95, opacity: 0, y: 20 }}
-                            className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden"
+                            className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
                             onClick={e => e.stopPropagation()}
                         >
-                            <div className="p-6 border-b border-neutral-100 dark:border-neutral-800 flex justify-between items-center">
-                                <h2 className="font-serif text-2xl">Create Post</h2>
-                                <button onClick={() => setShowCreatePost(false)} className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-full transition-colors">
+                            {/* Header */}
+                            <div className="p-4 border-b border-neutral-100 dark:border-neutral-800 flex justify-between items-center relative">
+                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                    <h2 className="font-bold text-lg">Create Post</h2>
+                                </div>
+                                <div /> {/* Spacer */}
+                                <button onClick={() => setShowCreatePost(false)} className="p-2 bg-neutral-100 dark:bg-neutral-800 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors z-10">
                                     <X size={20} />
                                 </button>
                             </div>
 
-                            <div className="p-6 space-y-6">
-                                {/* Simple Tabs */}
-                                <div className="flex gap-2 p-1.5 bg-neutral-100 dark:bg-neutral-800 rounded-2xl w-fit">
-                                    {[
-                                        { id: 'text', label: 'Text', icon: FileText },
-                                        { id: 'link', label: 'Link', icon: LinkIcon },
-                                        { id: 'image', label: 'Image', icon: ImageIcon },
-                                        { id: 'paper', label: 'Article (PDF)', icon: UploadCloud }
-                                    ].map((tab) => (
-                                        <button
-                                            key={tab.id}
-                                            onClick={() => {
-                                                setPostType(tab.id as PostType);
-                                                setSelectedFile(null); // Reset file selection on type switch
-                                            }}
-                                            className={`px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2 ${postType === tab.id
-                                                ? 'bg-white dark:bg-neutral-700 shadow-sm text-black dark:text-white'
-                                                : 'text-neutral-500 hover:text-neutral-700'
-                                                }`}
+                            {/* Content Area */}
+                            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                                {/* User Info & Community Select (Inline) */}
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-neutral-200 to-neutral-300 dark:from-neutral-700 dark:to-neutral-800 flex items-center justify-center text-sm font-serif">
+                                        {user?.displayName?.charAt(0) || 'U'}
+                                    </div>
+                                    <div>
+                                        <div className="font-bold text-sm">{user?.displayName || 'User'}</div>
+                                        <select
+                                            value={postCommunity}
+                                            onChange={e => setPostCommunity(e.target.value)}
+                                            className="mt-0.5 text-xs font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 rounded-md py-1 px-2 border-none outline-none cursor-pointer hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors"
                                         >
-                                            <tab.icon size={16} />
-                                            {tab.label}
-                                        </button>
-                                    ))}
+                                            <option value="">Select Community ▾</option>
+                                            {communities.map(c => (
+                                                <option key={c.id} value={c.id}>r/{c.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
                                 </div>
 
-                                <div className="space-y-4">
-                                    {/* Community Selector */}
-                                    <select
-                                        value={postCommunity}
-                                        onChange={e => setPostCommunity(e.target.value)}
-                                        className="w-full p-4 bg-neutral-50 dark:bg-neutral-800 rounded-xl border-none outline-none focus:ring-2 focus:ring-blue-500/20"
-                                    >
-                                        <option value="">Select a Community</option>
-                                        {communities.map(c => (
-                                            <option key={c.id} value={c.id}>r/{c.name}</option>
-                                        ))}
-                                    </select>
+                                <input
+                                    type="text"
+                                    value={postTitle}
+                                    onChange={e => setPostTitle(e.target.value)}
+                                    placeholder="Title"
+                                    className="w-full text-xl font-bold bg-transparent border-none outline-none placeholder:text-neutral-300 dark:placeholder:text-neutral-600"
+                                />
 
-                                    <input
-                                        type="text"
-                                        value={postTitle}
-                                        onChange={e => setPostTitle(e.target.value)}
-                                        placeholder="Title"
-                                        className="w-full text-lg font-medium bg-transparent border-b border-neutral-200 dark:border-neutral-700 py-2 outline-none focus:border-blue-500 transition-colors"
-                                    />
+                                <textarea
+                                    value={postContent}
+                                    onChange={e => setPostContent(e.target.value)}
+                                    placeholder={`What's on your mind, ${user?.displayName?.split(' ')[0]}?`}
+                                    className="w-full min-h-[120px] bg-transparent resize-none outline-none text-lg leading-relaxed placeholder:text-neutral-400 dark:placeholder:text-neutral-500"
+                                />
 
-                                    {postType === 'text' && (
-                                        <textarea
-                                            value={postContent}
-                                            onChange={e => setPostContent(e.target.value)}
-                                            placeholder="Sharing your thoughts..."
-                                            className="w-full min-h-[150px] bg-transparent resize-none outline-none text-neutral-600 dark:text-neutral-300 leading-relaxed"
-                                        />
-                                    )}
-
-                                    {postType === 'link' && (
+                                {/* Link Input */}
+                                {activeAttachment === 'link' && (
+                                    <div className="relative flex items-center bg-neutral-50 dark:bg-neutral-800 rounded-xl p-2 border border-blue-200 dark:border-blue-900/50 shadow-sm animate-in fade-in zoom-in-95 duration-200">
+                                        <div className="p-2 bg-blue-100 dark:bg-blue-900/40 rounded-lg text-blue-500 mr-2">
+                                            <LinkIcon size={20} />
+                                        </div>
                                         <input
                                             type="url"
                                             value={postLink}
                                             onChange={e => setPostLink(e.target.value)}
-                                            placeholder="https://..."
-                                            className="w-full p-4 bg-neutral-50 dark:bg-neutral-800 rounded-xl outline-none border border-transparent focus:border-blue-500 transition-colors"
+                                            placeholder="https://"
+                                            className="flex-1 bg-transparent border-none outline-none text-sm font-medium text-blue-600 dark:text-blue-400"
+                                            autoFocus
                                         />
-                                    )}
+                                        <button onClick={removeAttachment} className="p-1.5 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded-full transition-colors text-neutral-400">
+                                            <X size={16} />
+                                        </button>
+                                    </div>
+                                )}
 
-                                    {(postType === 'image' || postType === 'paper') && (
-                                        <div className="w-full">
-                                            {!selectedFile ? (
-                                                <div
-                                                    className="w-full h-48 border-2 border-dashed border-neutral-300 dark:border-neutral-700 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"
-                                                    onClick={() => fileInputRef.current?.click()}
-                                                >
-                                                    <div className="w-12 h-12 bg-neutral-100 dark:bg-neutral-800 rounded-full flex items-center justify-center text-neutral-400 mb-3">
-                                                        <UploadCloud size={24} />
-                                                    </div>
-                                                    <p className="text-neutral-500 font-medium">Click or Drag to Upload {postType === 'image' ? 'Image' : 'PDF'}</p>
-                                                    <p className="text-neutral-400 text-xs mt-1">{postType === 'image' ? 'JPG, PNG, GIF' : 'PDF up to 10MB'}</p>
-                                                    <input
-                                                        type="file"
-                                                        ref={fileInputRef}
-                                                        className="hidden"
-                                                        accept={postType === 'image' ? "image/*" : "application/pdf"}
-                                                        onChange={handleFileSelect}
-                                                    />
+                                {/* Image/File Preview Area */}
+                                {(activeAttachment === 'image' || activeAttachment === 'file') && selectedFile && (
+                                    <div className="relative rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 animate-in fade-in zoom-in-95 duration-200">
+                                        <button
+                                            onClick={removeAttachment}
+                                            className="absolute top-2 right-2 p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full backdrop-blur-sm transition-colors z-10"
+                                        >
+                                            <X size={16} />
+                                        </button>
+
+                                        {activeAttachment === 'image' && filePreview && (
+                                            <img src={filePreview} alt="Preview" className="w-full max-h-[300px] object-cover" />
+                                        )}
+
+                                        {activeAttachment === 'file' && (
+                                            <div className="flex items-center gap-4 p-4">
+                                                <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center text-emerald-600">
+                                                    <FileText size={24} />
                                                 </div>
-                                            ) : (
-                                                <div className="w-full p-4 bg-neutral-50 dark:bg-neutral-800 rounded-xl flex items-center gap-4">
-                                                    <div className="w-12 h-12 bg-neutral-200 dark:bg-neutral-700 rounded-lg flex items-center justify-center text-neutral-500">
-                                                        {postType === 'image' ? <ImageIcon size={24} /> : <FileText size={24} />}
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <p className="font-medium truncate">{selectedFile.name}</p>
-                                                        <p className="text-xs text-neutral-400">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
-                                                    </div>
-                                                    <button
-                                                        onClick={() => setSelectedFile(null)}
-                                                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                                                    >
-                                                        <Trash2 size={20} />
-                                                    </button>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="font-medium truncate">{selectedFile.name}</p>
+                                                    <p className="text-xs text-neutral-400">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB PDF</p>
                                                 </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
 
-                            <div className="p-6 border-t border-neutral-100 dark:border-neutral-800 flex justify-end gap-3">
-                                <button
-                                    onClick={() => setShowCreatePost(false)}
-                                    className="px-6 py-2.5 rounded-full text-sm font-medium hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
-                                >
-                                    Cancel
-                                </button>
+                            {/* Hidden File Input */}
+                            <input
+                                type="file"
+                                ref={fileInputRef}
+                                className="hidden"
+                                onChange={handleFileSelect}
+                            />
+
+                            {/* Footer / Add to Post */}
+                            <div className="p-4 border-t border-neutral-100 dark:border-neutral-800">
+                                <div className="flex items-center justify-between p-3 border border-neutral-200 dark:border-neutral-800 rounded-xl mb-4 shadow-sm bg-white dark:bg-neutral-900/50">
+                                    <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100 pl-1">Add to your post</span>
+                                    <div className="flex gap-1">
+                                        <button
+                                            onClick={() => triggerFileSelect('image')}
+                                            className={`p-2 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors ${activeAttachment === 'image' ? 'bg-green-100 dark:bg-green-900/20 text-green-600' : 'text-green-500'}`}
+                                            title="Photo/Video"
+                                        >
+                                            <ImageIcon size={24} />
+                                        </button>
+                                        <button
+                                            onClick={() => triggerFileSelect('file')}
+                                            className={`p-2 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors ${activeAttachment === 'file' ? 'bg-red-100 dark:bg-red-900/20 text-red-600' : 'text-red-500'}`}
+                                            title="PDF Document"
+                                        >
+                                            <FileText size={24} />
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setActiveAttachment('link');
+                                                setPostType('link');
+                                            }}
+                                            className={`p-2 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors ${activeAttachment === 'link' ? 'bg-blue-100 dark:bg-blue-900/20 text-blue-600' : 'text-blue-500'}`}
+                                            title="Link"
+                                        >
+                                            <LinkIcon size={24} />
+                                        </button>
+                                    </div>
+                                </div>
+
                                 <button
                                     onClick={handleCreatePost}
                                     disabled={!postTitle.trim() || !postCommunity || isSubmitting}
-                                    className="px-8 py-2.5 bg-black dark:bg-white text-white dark:text-black rounded-full text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity flex items-center gap-2"
+                                    className="w-full py-2.5 bg-black dark:bg-white text-white dark:text-black rounded-lg text-sm font-bold hover:opacity-90 disabled:opacity-50 transition-opacity flex items-center justify-center gap-2"
                                 >
                                     {isSubmitting && <Loader2 className="animate-spin" size={16} />}
-                                    {isSubmitting ? 'Uploading...' : 'Post'}
+                                    {isSubmitting ? 'Posting...' : 'Post'}
                                 </button>
                             </div>
                         </motion.div>
