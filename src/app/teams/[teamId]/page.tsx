@@ -1060,28 +1060,41 @@ export default function TeamDetailPage() {
 
         setIsUploading(true);
         try {
-            // 1. Upload File if selected
+            // 1. Upload File if selected (now using Firebase Storage)
             if (selectedFile) {
                 try {
-                    const base64Content = await fileToBase64(selectedFile);
+                    const { uploadPdfToFirebase } = await import('@/lib/pdf-upload');
+                    const { generatePdfThumbnail, isPdfFile } = await import('@/lib/pdf-thumbnail');
+                    const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+                    const { getPdfStorage } = await import('@/lib/firebase-storage');
 
-                    // Use text/plain to avoid complex CORS preflight issues with GAS depending on setup
-                    // But usually standard POST with body works if web app is open.
-                    // Using no-cors mode would fail to give us the response.
-                    // We assume the GAS script is deployed correctly.
+                    const filename = `${Date.now()}_${selectedFile.name}`;
 
-                    const res = await fetch(GAS_API_URL, {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            filename: selectedFile.name,
-                            mimeType: selectedFile.type,
-                            fileContent: base64Content
-                        })
-                    });
+                    // Upload file to Firebase Storage
+                    const result = await uploadPdfToFirebase(
+                        selectedFile,
+                        filename,
+                        teamId,
+                        'chat'
+                    );
 
-                    const data = await res.json();
-
-                    if (data.status === 'success') {
+                    if (result.success && result.downloadUrl) {
+                        // Generate thumbnail for PDFs
+                        let thumbnailUrl: string | undefined;
+                        if (isPdfFile(selectedFile)) {
+                            try {
+                                const thumbnailResult = await generatePdfThumbnail(selectedFile, 300);
+                                if (thumbnailResult.success && thumbnailResult.blob) {
+                                    const storage = getPdfStorage();
+                                    const thumbPath = `projects/${teamId}/thumbnails/${filename.replace('.pdf', '.png')}`;
+                                    const thumbRef = ref(storage, thumbPath);
+                                    await uploadBytes(thumbRef, thumbnailResult.blob, { contentType: 'image/png' });
+                                    thumbnailUrl = await getDownloadURL(thumbRef);
+                                }
+                            } catch (thumbError) {
+                                console.error('Thumbnail generation failed (non-critical):', thumbError);
+                            }
+                        }
 
                         // Auto-save to "聊天室資料" folder
                         let chatFolderId = files.find(f => f.name === '聊天室資料' && f.type === 'folder' && !f.parentId)?.id;
@@ -1099,12 +1112,14 @@ export default function TeamDetailPage() {
                             const fileId = `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
                             await addTeamFile(teamId, {
-                                id: fileId, // Use generated ID
+                                id: fileId,
                                 name: selectedFile.name,
-                                url: data.url,
+                                url: result.downloadUrl,
                                 type: selectedFile.type,
                                 size: selectedFile.size,
                                 parentId: chatFolderId,
+                                storagePath: result.storagePath,
+                                thumbnailUrl: thumbnailUrl,
                                 uploadedBy: user.email!,
                                 uploadedAt: new Date(),
                                 color: 'blue',
@@ -1113,28 +1128,29 @@ export default function TeamDetailPage() {
 
                             attachments.push({
                                 name: selectedFile.name,
-                                url: data.url,
+                                url: result.downloadUrl,
                                 type: selectedFile.type,
                                 size: selectedFile.size,
-                                fileId: fileId // Include file ID for comment sync
+                                fileId: fileId,
+                                thumbnailUrl: thumbnailUrl
                             });
                         } else {
-                            // Fallback: no folder, still push attachment but without fileId
                             attachments.push({
                                 name: selectedFile.name,
-                                url: data.url,
+                                url: result.downloadUrl,
                                 type: selectedFile.type,
-                                size: selectedFile.size
+                                size: selectedFile.size,
+                                thumbnailUrl: thumbnailUrl
                             });
                         }
                     } else {
-                        throw new Error(data.message || "Upload failed");
+                        throw new Error(result.error || "Firebase Storage upload failed");
                     }
                 } catch (uploadError) {
-                    console.error("GAS Upload Error", uploadError);
-                    showToast("Failed to upload file to Drive", "error");
+                    console.error("Firebase Upload Error", uploadError);
+                    showToast("Failed to upload file", "error");
                     setIsUploading(false);
-                    return; // Stop sending message if upload fails
+                    return;
                 }
             }
 
