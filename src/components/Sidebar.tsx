@@ -71,6 +71,14 @@ export default function Sidebar() {
                     {!isCollapsed && <span>Feedback</span>}
                 </button>
                 <button
+                    onClick={() => router.push('/settings')}
+                    className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'space-x-3 px-4'} py-3 rounded-xl text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors`}
+                    title={isCollapsed ? "Settings" : ""}
+                >
+                    <Settings size={20} />
+                    {!isCollapsed && <span>Settings</span>}
+                </button>
+                <button
                     onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
                     className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'space-x-3 px-4'} py-3 rounded-xl text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors`}
                     title={isCollapsed ? "Toggle Theme" : ""}
