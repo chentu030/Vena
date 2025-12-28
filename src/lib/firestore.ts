@@ -1290,6 +1290,20 @@ export const voteComment = async (commentId: string, odId: string, voteType: 'up
     await updateUserKarma(comment.authorId, 0, karmaChange);
 };
 
+export const deleteComment = async (commentId: string, postId: string) => {
+    await deleteDoc(doc(db, 'comments', commentId));
+
+    // Update post comment count
+    const postRef = doc(db, 'posts', postId);
+    const postSnap = await getDoc(postRef);
+    if (postSnap.exists()) {
+        const currentCount = postSnap.data().commentCount || 0;
+        await updateDoc(postRef, { commentCount: Math.max(0, currentCount - 1) });
+    }
+    // We don't strictly revert karma on simple delete to avoid complex calculation of net votes lost, 
+    // but you could decrement the base +1 point if desired. Keeping it simple for now.
+};
+
 // User Karma
 export const getUserKarma = async (userId: string): Promise<UserKarma> => {
     const docRef = doc(db, 'userKarma', userId);

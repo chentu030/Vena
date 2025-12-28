@@ -11,7 +11,7 @@ import Sidebar from '@/components/Sidebar';
 import { useAuth } from '@/lib/auth';
 import {
     CommunityPost, PostComment, getPost, subscribeToComments,
-    votePost, voteComment, createComment, deletePost
+    votePost, voteComment, createComment, deletePost, deleteComment
 } from '@/lib/firestore';
 
 export default function PostDetailPage() {
@@ -115,6 +115,20 @@ export default function PostDetailPage() {
         router.push('/community');
     };
 
+    const handleDeleteComment = async (commentId: string) => {
+        if (!user || !post) return;
+        if (!confirm('Delete this comment?')) return;
+
+        try {
+            await deleteComment(commentId, post.id);
+            // Refetch post to update comment count
+            const updated = await getPost(postId);
+            setPost(updated);
+        } catch (error) {
+            console.error("Failed to delete comment:", error);
+        }
+    };
+
     const formatTime = (timestamp: any) => {
         if (!timestamp) return 'just now';
         const date = timestamp.toDate?.() || new Date(timestamp);
@@ -183,6 +197,15 @@ export default function PostDetailPage() {
                         >
                             Reply
                         </button>
+                        {user && user.uid === comment.authorId && (
+                            <button
+                                onClick={() => handleDeleteComment(comment.id)}
+                                className="font-medium hover:underline text-red-500 flex items-center gap-1 ml-2"
+                            >
+                                <Trash2 size={12} />
+                                Delete
+                            </button>
+                        )}
                     </div>
 
                     {/* Reply Input */}
