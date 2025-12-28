@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import { Search, FileText, ExternalLink, Loader2, Table, Download, Play, BookOpen, Calendar, Save, Trash2, FolderPlus, ChevronDown, Upload, Edit2, X, FileSearch, Eye, FolderInput, Check, Folder } from 'lucide-react';
 import { useAnalysis } from '@/context/AnalysisContext';
+import { useLanguage } from '@/context/LanguageContext';
 import { useAuth } from '@/lib/auth';
 import { useParams, useSearchParams } from 'next/navigation';
 import { db } from '@/lib/firebase';
@@ -72,6 +73,7 @@ export default function ResearchPanel({ onClose, initialResults, onSave, groups 
 
     // const [isAnalyzing, setIsAnalyzing] = useState(false); // Refactored to global context
     const [progress, setProgress] = useState('');
+    const { t } = useLanguage();
 
     // Global Context
     const { startAnalysis, startCheckPdf, state: analysisState } = useAnalysis();
@@ -107,7 +109,7 @@ export default function ResearchPanel({ onClose, initialResults, onSave, groups 
             // Use a small timeout to avoid double mounting issues in React Strict Mode
             const timer = setTimeout(() => {
                 if (groups.length === 0) {
-                    onCreateGroup(groups.length === 0 ? "預設" : "New Group");
+                    onCreateGroup(groups.length === 0 ? "預設" : t('research.groups.new'));
                 }
             }, 500);
             return () => clearTimeout(timer);
@@ -638,11 +640,11 @@ Output only the keywords:`
                 <div className="h-14 min-h-[3.5rem] flex items-center justify-between px-6 border-b border-border/40 bg-muted/20">
                     <span className="text-sm font-medium flex items-center gap-2">
                         <BookOpen size={16} className="text-blue-500" />
-                        Literature Review <span className="text-xs text-muted-foreground bg-neutral-200 dark:bg-neutral-800 px-2 py-0.5 rounded-full">Hybrid</span>
+                        {t('research.header.title')} <span className="text-xs text-muted-foreground bg-neutral-200 dark:bg-neutral-800 px-2 py-0.5 rounded-full">{t('research.header.hybrid')}</span>
                         <button
                             onClick={() => setIsHeaderOpen(!isHeaderOpen)}
                             className="ml-2 p-1 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-800 text-muted-foreground transition-colors"
-                            title={isHeaderOpen ? "Collapse Header" : "Expand Header"}
+                            title={isHeaderOpen ? t('research.header.collapse') : t('research.header.expand')}
                         >
                             {isHeaderOpen ? <ChevronDown size={16} /> : <ChevronDown size={16} className="-rotate-90" />}
                         </button>
@@ -652,7 +654,7 @@ Output only the keywords:`
                             onClick={exportCSV}
                             disabled={results.length === 0}
                             className="p-2 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded disabled:opacity-30 transition-colors"
-                            title="Export CSV"
+                            title={t('research.header.export')}
                         >
                             <Download size={16} />
                         </button>
@@ -669,17 +671,17 @@ Output only the keywords:`
                     {/* Group Selector - Always Visible */}
                     <div className="px-6 py-3 border-b border-border/40 bg-muted/10">
                         <div className="flex items-center gap-3">
-                            <span className="text-xs text-muted-foreground">Group:</span>
+                            <span className="text-xs text-muted-foreground">{t('research.groups.label')}</span>
 
                             {groups.length === 0 ? (
-                                <div className="text-sm text-neutral-500 italic">No groups created</div>
+                                <div className="text-sm text-neutral-500 italic">{t('research.groups.none')}</div>
                             ) : (
                                 <div className="relative">
                                     <button
                                         onClick={() => setShowGroupDropdown(!showGroupDropdown)}
                                         className="flex items-center gap-2 px-3 py-1.5 bg-neutral-100 dark:bg-neutral-800 rounded-lg text-sm hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors min-w-[150px] justify-between"
                                     >
-                                        <span className="truncate">{groups.find(g => g.id === currentGroupId)?.name || 'Select Group'}</span>
+                                        <span className="truncate">{groups.find(g => g.id === currentGroupId)?.name || t('research.groups.select')}</span>
                                         <ChevronDown size={14} />
                                     </button>
                                     {showGroupDropdown && (
@@ -734,7 +736,7 @@ Output only the keywords:`
                                                     }
                                                 }}
                                                 className="p-1.5 text-neutral-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                                                title="Rename Group"
+                                                title={t('research.groups.rename')}
                                             >
                                                 <Edit2 size={14} />
                                             </button>
@@ -745,7 +747,7 @@ Output only the keywords:`
                                                     }
                                                 }}
                                                 className="p-1.5 text-neutral-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                                                title="Delete Group"
+                                                title={t('research.groups.delete')}
                                             >
                                                 <Trash2 size={14} />
                                             </button>
@@ -760,7 +762,7 @@ Output only the keywords:`
                                 onClick={() => setShowNewGroupInput(true)}
                                 className="flex items-center gap-1 px-2 py-1.5 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
                             >
-                                <FolderPlus size={14} /> New Group
+                                <FolderPlus size={14} /> {t('research.groups.new')}
                             </button>
                         </div>
                         {showNewGroupInput && (
@@ -769,7 +771,7 @@ Output only the keywords:`
                                     type="text"
                                     value={newGroupName}
                                     onChange={(e) => setNewGroupName(e.target.value)}
-                                    placeholder="Enter group name..."
+                                    placeholder={t('search.enterGroupName')}
                                     className="flex-1 px-3 py-1.5 bg-white dark:bg-neutral-800 border border-border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
                                     autoFocus
                                     onKeyDown={(e) => {
@@ -793,13 +795,13 @@ Output only the keywords:`
                                     }}
                                     className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors"
                                 >
-                                    Create
+                                    {t('research.groups.create')}
                                 </button>
                                 <button
                                     onClick={() => { setShowNewGroupInput(false); setNewGroupName(''); }}
                                     className="px-3 py-1.5 bg-neutral-200 dark:bg-neutral-700 rounded-lg text-sm hover:bg-neutral-300 dark:hover:bg-neutral-600 transition-colors"
                                 >
-                                    Cancel
+                                    {t('research.groups.cancel')}
                                 </button>
                             </div>
                         )}
@@ -811,7 +813,7 @@ Output only the keywords:`
                         {selectedPaperIds.size > 0 && (
                             <div className="flex items-center gap-2 bg-blue-50 dark:bg-blue-900/20 p-2 rounded-lg border border-blue-100 dark:border-blue-800 animate-in fade-in slide-in-from-top-1">
                                 <span className="text-sm font-medium text-blue-700 dark:text-blue-300 ml-1">
-                                    {selectedPaperIds.size} selected
+                                    {selectedPaperIds.size} {t('research.batch.selected')}
                                 </span>
                                 <div className="h-4 w-px bg-blue-200 dark:bg-blue-700 mx-1" />
 
@@ -821,7 +823,7 @@ Output only the keywords:`
                                         className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-800 rounded transition-colors"
                                     >
                                         <FolderInput size={14} />
-                                        Move to...
+                                        {t('research.batch.move')}
                                     </button>
 
                                     {showMoveDropdown && (
@@ -837,7 +839,7 @@ Output only the keywords:`
                                                 </button>
                                             ))}
                                             {groups.filter(g => g.id !== currentGroupId).length === 0 && (
-                                                <div className="px-3 py-2 text-xs text-muted-foreground">No other groups</div>
+                                                <div className="px-3 py-2 text-xs text-muted-foreground">{t('research.batch.noGroups')}</div>
                                             )}
                                         </div>
                                     )}
@@ -848,7 +850,7 @@ Output only the keywords:`
                                     className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
                                 >
                                     <Trash2 size={14} />
-                                    Delete
+                                    {t('research.batch.delete')}
                                 </button>
 
                                 <div className="flex-1" />
@@ -857,7 +859,7 @@ Output only the keywords:`
                                     onClick={() => handleSelectAll(false)}
                                     className="px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
                                 >
-                                    Clear
+                                    {t('research.batch.clear')}
                                 </button>
                             </div>
                         )}
@@ -867,7 +869,7 @@ Output only the keywords:`
                                 type="text"
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
-                                placeholder="Search in list..."
+                                placeholder={t('research.placeholder')}
                                 className="w-full pl-10 pr-4 py-2 bg-neutral-100 dark:bg-neutral-900 border border-transparent focus:border-blue-500 rounded-lg outline-none transition-all"
                             />
                             <Search className="absolute left-3 top-2.5 text-muted-foreground" size={16} />
@@ -880,19 +882,19 @@ Output only the keywords:`
                                         onClick={analyzeDeeply}
                                         className="flex items-center gap-1 px-3 py-1.5 bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 rounded-lg text-xs font-medium transition-colors"
                                     >
-                                        <Play size={12} fill="currentColor" /> Deep Analysis
+                                        <Play size={12} fill="currentColor" /> {t('research.buttons.deepAnalysis')}
                                     </button>
                                     <button
                                         onClick={() => setShowFindPdfConfirm(true)}
                                         className="flex items-center gap-1 px-3 py-1.5 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50 rounded-lg text-xs font-medium transition-colors"
                                     >
-                                        <FileSearch size={12} /> Find PDFs
+                                        <FileSearch size={12} /> {t('research.buttons.findPdf')}
                                     </button>
                                 </>
                             )}
                             {isInternalAnalyzing && (
                                 <div className="flex items-center gap-1 text-xs text-purple-600 animate-pulse">
-                                    <Loader2 size={12} className="animate-spin" /> Analyzing...
+                                    <Loader2 size={12} className="animate-spin" /> {t('research.buttons.analyzing')}
                                 </div>
                             )}
                         </div>
@@ -924,10 +926,10 @@ Output only the keywords:`
                                         <span>#</span>
                                     </div>
                                 </th>
-                                <th className="px-4 py-3 font-medium w-[200px]">Article Details</th>
-                                <th className="px-2 py-3 font-medium w-[60px]">Metrics</th>
-                                <th className="px-4 py-3 font-medium w-[250px]">Analysis (Abstract & Method)</th>
-                                <th className="px-4 py-3 font-medium w-[80px] text-center">PDF</th>
+                                <th className="px-4 py-3 font-medium w-[200px]">{t('research.table.details')}</th>
+                                <th className="px-2 py-3 font-medium w-[60px]">{t('research.table.metrics')}</th>
+                                <th className="px-4 py-3 font-medium w-[250px]">{t('research.table.analysis')}</th>
+                                <th className="px-4 py-3 font-medium w-[80px] text-center">{t('research.table.pdf')}</th>
                                 <th className="px-2 py-3 font-medium w-[40px] text-center"></th>
                             </tr>
                         </thead>
@@ -969,14 +971,14 @@ Output only the keywords:`
                                         )}
                                     </td>
                                     <td className="px-2 py-3 align-top text-muted-foreground text-xs space-y-1 w-[100px]">
-                                        <div className="flex justify-between"><span>Year:</span> <span className="font-mono text-foreground">{article.year}</span></div>
-                                        <div className="flex justify-between"><span>Pages:</span> <span className="font-mono">{article.pages}</span></div>
+                                        <div className="flex justify-between"><span>{t('research.table.year')}:</span> <span className="font-mono text-foreground">{article.year}</span></div>
+                                        <div className="flex justify-between"><span>{t('research.table.pages')}:</span> <span className="font-mono">{article.pages}</span></div>
                                         <div className="flex justify-between gap-1">
-                                            <span>DOI:</span>
+                                            <span>{t('research.table.doi')}:</span>
                                             <span className="font-mono text-[10px] break-all">{article.doi || '-'}</span>
                                         </div>
                                         {(article.id.startsWith('gen-gemini') || (article.sourceModel && article.sourceModel.includes('gemini'))) && (
-                                            <div className="mt-2 text-[10px] bg-purple-100 text-purple-600 dark:bg-purple-900/30 px-1 py-0.5 rounded w-fit">Gemini Generated</div>
+                                            <div className="mt-2 text-[10px] bg-purple-100 text-purple-600 dark:bg-purple-900/30 px-1 py-0.5 rounded w-fit">{t('research.table.geminiGenerated')}</div>
                                         )}
                                         {/* Scopus Badge */}
                                         {(article.sourceModel === 'scopus' || article.id.startsWith('scopus') || article.id.startsWith('SCOPUS_ID') || article.source === 'Scopus') && (
@@ -1029,7 +1031,7 @@ Output only the keywords:`
                                                             fileInputRef.current?.click();
                                                         }}
                                                         className="inline-flex p-1.5 text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded transition-colors"
-                                                        title="Manual Upload"
+                                                        title={t('research.pdf.manual')}
                                                     >
                                                         <Upload size={14} />
                                                     </button>
@@ -1043,7 +1045,7 @@ Output only the keywords:`
                                                                 target="_blank"
                                                                 rel="noopener noreferrer"
                                                                 className="inline-flex p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-colors"
-                                                                title="Open PDF"
+                                                                title={t('research.pdf.open')}
                                                             >
                                                                 <Download size={14} />
                                                             </a>
@@ -1067,7 +1069,7 @@ Output only the keywords:`
                                                     <button
                                                         onClick={() => handleDeletePdf(article.id)}
                                                         className="inline-flex p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                                                        title="Remove PDF Link"
+                                                        title={t('research.pdf.remove')}
                                                     >
                                                         <Trash2 size={14} />
                                                     </button>
@@ -1079,7 +1081,7 @@ Output only the keywords:`
                                                         fileInputRef.current?.click();
                                                     }}
                                                     className="inline-flex p-1.5 text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded transition-colors"
-                                                    title="Upload PDF to Google Drive"
+                                                    title={t('research.pdf.upload')}
                                                 >
                                                     <Upload size={14} />
                                                 </button>
@@ -1233,9 +1235,9 @@ Output only the keywords:`
                                     <FileSearch size={24} />
                                 </div>
                                 <div>
-                                    <h3 className="text-lg font-semibold">Start PDF Search?</h3>
+                                    <h3 className="text-lg font-semibold">{t('research.pdf.confirmTitle')}</h3>
                                     <p className="text-sm text-muted-foreground">
-                                        This will search directly for PDFs for papers missing them.
+                                        {t('research.pdf.confirmDesc')}
                                     </p>
                                 </div>
                             </div>
@@ -1249,9 +1251,9 @@ Output only the keywords:`
                                         onChange={(e) => setRetryFailedPdfs(e.target.checked)}
                                     />
                                     <div className="text-sm">
-                                        <span className="font-medium">Retry previously failed papers</span>
+                                        <span className="font-medium">{t('research.pdf.retry')}</span>
                                         <p className="text-muted-foreground text-xs mt-0.5">
-                                            If checked, we'll try again for papers marked as 'failed'. Useful if you updated the crawler logic.
+                                            {t('research.pdf.retryDesc')}
                                         </p>
                                     </div>
                                 </label>
@@ -1262,7 +1264,7 @@ Output only the keywords:`
                                     onClick={() => setShowFindPdfConfirm(false)}
                                     className="px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg transition-colors"
                                 >
-                                    Cancel
+                                    {t('research.groups.cancel')}
                                 </button>
                                 <button
                                     onClick={() => {
@@ -1285,7 +1287,7 @@ Output only the keywords:`
                                     }}
                                     className="px-4 py-2 text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 rounded-lg shadow-sm transition-colors"
                                 >
-                                    Start Finding
+                                    {t('research.pdf.start')}
                                 </button>
                             </div>
                         </div>

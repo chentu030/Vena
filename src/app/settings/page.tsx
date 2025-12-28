@@ -13,13 +13,16 @@ import { useTheme } from 'next-themes';
 import { getUserProfile, updateUserProfile, UserProfile } from '@/lib/firestore';
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { useLanguage } from '@/context/LanguageContext';
+import { Language } from '@/locales';
 
-type SettingsTab = 'profile' | 'appearance' | 'account' | 'notifications';
+type SettingsTab = 'profile' | 'appearance';
 
 export default function SettingsPage() {
     const router = useRouter();
     const { user, loading } = useAuth();
     const { theme, setTheme } = useTheme();
+    const { language, setLanguage, t } = useLanguage();
     const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -52,12 +55,13 @@ export default function SettingsPage() {
         }
 
         if (user) {
-            // Load profile from Firestore
             getUserProfile(user.uid).then(data => {
                 if (data) {
-                    setProfile({ ...data }); // Ensure we have a fresh object
+                    setProfile({ ...data });
+                    if (data.language && data.language !== language) {
+                        setLanguage(data.language as Language);
+                    }
                 } else {
-                    // Initialize with Auth data if no profile exists
                     setProfile(prev => ({
                         ...prev,
                         uid: user.uid,
@@ -77,13 +81,17 @@ export default function SettingsPage() {
         setMessage(null);
         try {
             await updateUserProfile(user.uid, profile);
-            setMessage({ type: 'success', text: 'Settings saved successfully' });
 
-            // Auto hide message
+            // Sync language context if profile language changed
+            if (profile.language && profile.language !== language) {
+                setLanguage(profile.language as Language);
+            }
+
+            setMessage({ type: 'success', text: t('settings.messages.saved') });
             setTimeout(() => setMessage(null), 3000);
         } catch (error) {
             console.error(error);
-            setMessage({ type: 'error', text: 'Failed to save settings' });
+            setMessage({ type: 'error', text: t('settings.messages.saveFailed') });
         } finally {
             setIsSaving(false);
         }
@@ -93,30 +101,24 @@ export default function SettingsPage() {
         if (e.target.files && e.target.files[0] && user) {
             const file = e.target.files[0];
             setIsUploadingAvatar(true);
-
-            // Preview immediately
             const objectUrl = URL.createObjectURL(file);
             setAvatarPreview(objectUrl);
 
             try {
-                // Upload to Storage
                 const storagePath = `users/${user.uid}/avatar_${Date.now()}`;
                 const storageRef = ref(storage, storagePath);
                 await uploadBytes(storageRef, file);
                 const downloadUrl = await getDownloadURL(storageRef);
 
-                // Update Profile State
                 setProfile(prev => ({ ...prev, photoURL: downloadUrl }));
-
-                // Automatically save the new avatar URL to profile
                 await updateUserProfile(user.uid, { photoURL: downloadUrl });
-                setMessage({ type: 'success', text: 'Avatar updated' });
+                setMessage({ type: 'success', text: t('settings.messages.avatarUpdated') });
                 setTimeout(() => setMessage(null), 3000);
 
             } catch (error) {
                 console.error("Avatar upload failed:", error);
-                setMessage({ type: 'error', text: 'Failed to upload image' });
-                setAvatarPreview(null); // Revert preview on error
+                setMessage({ type: 'error', text: t('settings.messages.uploadFailed') });
+                setAvatarPreview(null);
             } finally {
                 setIsUploadingAvatar(false);
             }
@@ -132,10 +134,8 @@ export default function SettingsPage() {
     }
 
     const tabs = [
-        { id: 'profile', label: 'Profile', icon: User },
-        { id: 'appearance', label: 'Appearance', icon: Laptop },
-        // { id: 'notifications', label: 'Notifications', icon: Bell }, // Future
-        // { id: 'account', label: 'Account', icon: Shield } // Future
+        { id: 'profile', label: t('settings.tabs.profile'), icon: User },
+        { id: 'appearance', label: t('settings.tabs.appearance'), icon: Laptop },
     ];
 
     return (
@@ -144,20 +144,19 @@ export default function SettingsPage() {
 
             <main className="flex-1 max-w-5xl mx-auto p-6 lg:p-10">
                 <header className="mb-10">
-                    <h1 className="text-3xl font-serif font-bold mb-2">Settings</h1>
-                    <p className="text-neutral-500 dark:text-neutral-400">Manage your profile and preferences.</p>
+                    <h1 className="text-3xl font-serif font-bold mb-2">{t('settings.title')}</h1>
+                    <p className="text-neutral-500 dark:text-neutral-400">{t('settings.subtitle')}</p>
                 </header>
 
                 <div className="flex flex-col lg:flex-row gap-8">
-                    {/* Settings Sidebar */}
                     <nav className="lg:w-64 space-y-1">
                         {tabs.map(tab => (
                             <button
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id as SettingsTab)}
                                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium ${activeTab === tab.id
-                                        ? 'bg-white dark:bg-neutral-800 shadow-sm text-blue-600 dark:text-blue-400'
-                                        : 'text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800/50'
+                                    ? 'bg-white dark:bg-neutral-800 shadow-sm text-blue-600 dark:text-blue-400'
+                                    : 'text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800/50'
                                     }`}
                             >
                                 <tab.icon size={18} />
@@ -167,10 +166,8 @@ export default function SettingsPage() {
                         ))}
                     </nav>
 
-                    {/* Main Content Area */}
                     <div className="flex-1 space-y-6">
                         <AnimatePresence mode="wait">
-                            {/* PROFILE TAB */}
                             {activeTab === 'profile' && (
                                 <motion.div
                                     key="profile"
@@ -179,9 +176,8 @@ export default function SettingsPage() {
                                     exit={{ opacity: 0, x: -20 }}
                                     className="space-y-6"
                                 >
-                                    {/* Avatar Section */}
                                     <section className="bg-white dark:bg-neutral-900 rounded-2xl p-6 border border-neutral-200 dark:border-neutral-800 shadow-sm">
-                                        <h2 className="text-lg font-bold mb-6">Profile Picture</h2>
+                                        <h2 className="text-lg font-bold mb-6">{t('settings.profile.title')}</h2>
                                         <div className="flex items-center gap-6">
                                             <div className="relative group">
                                                 <div className="w-24 h-24 rounded-full overflow-hidden bg-neutral-100 dark:bg-neutral-800 border-2 border-white dark:border-neutral-700 shadow-lg">
@@ -196,8 +192,6 @@ export default function SettingsPage() {
                                                             {profile.displayName?.charAt(0).toUpperCase() || 'U'}
                                                         </div>
                                                     )}
-
-                                                    {/* Upload Overlay */}
                                                     <div
                                                         className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
                                                         onClick={() => fileInputRef.current?.click()}
@@ -218,7 +212,7 @@ export default function SettingsPage() {
                                                         onClick={() => fileInputRef.current?.click()}
                                                         className="px-4 py-2 bg-neutral-900 dark:bg-white text-white dark:text-black rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
                                                     >
-                                                        Change Photo
+                                                        {t('settings.profile.changePhoto')}
                                                     </button>
                                                     <button
                                                         onClick={() => {
@@ -227,10 +221,10 @@ export default function SettingsPage() {
                                                         }}
                                                         className="px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg text-sm font-medium hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
                                                     >
-                                                        Remove
+                                                        {t('settings.profile.remove')}
                                                     </button>
                                                 </div>
-                                                <p className="text-xs text-neutral-400">Supported formats: JPG, PNG, GIF. Max size: 5MB.</p>
+                                                <p className="text-xs text-neutral-400">{t('settings.profile.supportedFormats')}</p>
                                                 <input
                                                     type="file"
                                                     ref={fileInputRef}
@@ -242,13 +236,12 @@ export default function SettingsPage() {
                                         </div>
                                     </section>
 
-                                    {/* Personal Info */}
                                     <section className="bg-white dark:bg-neutral-900 rounded-2xl p-6 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-6">
-                                        <h2 className="text-lg font-bold">Personal Information</h2>
+                                        <h2 className="text-lg font-bold">{t('settings.profile.personalInfo')}</h2>
 
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                             <div className="space-y-2">
-                                                <label className="text-sm font-medium text-neutral-500">Display Name</label>
+                                                <label className="text-sm font-medium text-neutral-500">{t('settings.profile.displayName')}</label>
                                                 <div className="flex items-center gap-2 p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-xl border border-neutral-200 dark:border-neutral-800 focus-within:ring-2 ring-blue-500/20 transition-all">
                                                     <User size={18} className="text-neutral-400" />
                                                     <input
@@ -256,13 +249,13 @@ export default function SettingsPage() {
                                                         value={profile.displayName}
                                                         onChange={e => setProfile({ ...profile, displayName: e.target.value })}
                                                         className="bg-transparent border-none outline-none flex-1 font-medium"
-                                                        placeholder="Your Name"
+                                                        placeholder={t('settings.profile.placeholders.name')}
                                                     />
                                                 </div>
                                             </div>
 
                                             <div className="space-y-2">
-                                                <label className="text-sm font-medium text-neutral-500">Email Address</label>
+                                                <label className="text-sm font-medium text-neutral-500">{t('settings.profile.email')}</label>
                                                 <div className="flex items-center gap-2 p-3 bg-neutral-100 dark:bg-neutral-800 rounded-xl border border-transparent opacity-70 cursor-not-allowed">
                                                     <Mail size={18} className="text-neutral-400" />
                                                     <input
@@ -275,7 +268,7 @@ export default function SettingsPage() {
                                             </div>
 
                                             <div className="space-y-2">
-                                                <label className="text-sm font-medium text-neutral-500">Job Title</label>
+                                                <label className="text-sm font-medium text-neutral-500">{t('settings.profile.jobTitle')}</label>
                                                 <div className="flex items-center gap-2 p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-xl border border-neutral-200 dark:border-neutral-800 focus-within:ring-2 ring-blue-500/20 transition-all">
                                                     <Briefcase size={18} className="text-neutral-400" />
                                                     <input
@@ -283,13 +276,13 @@ export default function SettingsPage() {
                                                         value={profile.jobTitle || ''}
                                                         onChange={e => setProfile({ ...profile, jobTitle: e.target.value })}
                                                         className="bg-transparent border-none outline-none flex-1"
-                                                        placeholder="e.g. Senior Researcher"
+                                                        placeholder={t('settings.profile.placeholders.job')}
                                                     />
                                                 </div>
                                             </div>
 
                                             <div className="space-y-2">
-                                                <label className="text-sm font-medium text-neutral-500">Organization</label>
+                                                <label className="text-sm font-medium text-neutral-500">{t('settings.profile.organization')}</label>
                                                 <div className="flex items-center gap-2 p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-xl border border-neutral-200 dark:border-neutral-800 focus-within:ring-2 ring-blue-500/20 transition-all">
                                                     <Building size={18} className="text-neutral-400" />
                                                     <input
@@ -297,13 +290,13 @@ export default function SettingsPage() {
                                                         value={profile.organization || ''}
                                                         onChange={e => setProfile({ ...profile, organization: e.target.value })}
                                                         className="bg-transparent border-none outline-none flex-1"
-                                                        placeholder="e.g. University of Science"
+                                                        placeholder={t('settings.profile.placeholders.org')}
                                                     />
                                                 </div>
                                             </div>
 
                                             <div className="space-y-2 md:col-span-2">
-                                                <label className="text-sm font-medium text-neutral-500">Website</label>
+                                                <label className="text-sm font-medium text-neutral-500">{t('settings.profile.website')}</label>
                                                 <div className="flex items-center gap-2 p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-xl border border-neutral-200 dark:border-neutral-800 focus-within:ring-2 ring-blue-500/20 transition-all">
                                                     <LinkIcon size={18} className="text-neutral-400" />
                                                     <input
@@ -317,12 +310,12 @@ export default function SettingsPage() {
                                             </div>
 
                                             <div className="space-y-2 md:col-span-2">
-                                                <label className="text-sm font-medium text-neutral-500">Bio</label>
+                                                <label className="text-sm font-medium text-neutral-500">{t('settings.profile.bio')}</label>
                                                 <textarea
                                                     value={profile.bio || ''}
                                                     onChange={e => setProfile({ ...profile, bio: e.target.value })}
                                                     className="w-full p-4 bg-neutral-50 dark:bg-neutral-800/50 rounded-xl border border-neutral-200 dark:border-neutral-800 focus:ring-2 ring-blue-500/20 outline-none min-h-[120px] resize-none leading-relaxed"
-                                                    placeholder="Tell us a bit about yourself..."
+                                                    placeholder={t('settings.profile.placeholders.bio')}
                                                 />
                                             </div>
                                         </div>
@@ -330,7 +323,6 @@ export default function SettingsPage() {
                                 </motion.div>
                             )}
 
-                            {/* APPEARANCE TAB */}
                             {activeTab === 'appearance' && (
                                 <motion.div
                                     key="appearance"
@@ -340,13 +332,13 @@ export default function SettingsPage() {
                                     className="space-y-6"
                                 >
                                     <section className="bg-white dark:bg-neutral-900 rounded-2xl p-6 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-6">
-                                        <h2 className="text-lg font-bold">Theme Preferences</h2>
+                                        <h2 className="text-lg font-bold">{t('settings.appearance.themeTitle')}</h2>
 
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                             {[
-                                                { id: 'light', label: 'Light', icon: Sun },
-                                                { id: 'dark', label: 'Dark', icon: Moon },
-                                                { id: 'system', label: 'System', icon: Laptop },
+                                                { id: 'light', label: t('settings.appearance.light'), icon: Sun },
+                                                { id: 'dark', label: t('settings.appearance.dark'), icon: Moon },
+                                                { id: 'system', label: t('settings.appearance.system'), icon: Laptop },
                                             ].map((mode) => (
                                                 <button
                                                     key={mode.id}
@@ -355,8 +347,8 @@ export default function SettingsPage() {
                                                         setProfile({ ...profile, themePreference: mode.id as any });
                                                     }}
                                                     className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-3 ${theme === mode.id
-                                                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-                                                            : 'border-transparent bg-neutral-50 dark:bg-neutral-800 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-700'
+                                                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+                                                        : 'border-transparent bg-neutral-50 dark:bg-neutral-800 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-700'
                                                         }`}
                                                 >
                                                     <mode.icon size={24} />
@@ -366,16 +358,20 @@ export default function SettingsPage() {
                                         </div>
 
                                         <div className="pt-6 border-t border-neutral-100 dark:border-neutral-800">
-                                            <h3 className="text-sm font-bold mb-4">Language</h3>
+                                            <h3 className="text-sm font-bold mb-4">{t('settings.appearance.languageTitle')}</h3>
                                             <div className="flex items-center gap-3 p-4 bg-neutral-50 dark:bg-neutral-800/50 rounded-xl border border-neutral-200 dark:border-neutral-800">
                                                 <Globe size={20} className="text-neutral-400" />
                                                 <select
                                                     value={profile.language || 'en'}
-                                                    onChange={e => setProfile({ ...profile, language: e.target.value as any })}
+                                                    onChange={e => {
+                                                        const newLang = e.target.value as Language;
+                                                        setProfile({ ...profile, language: newLang });
+                                                        setLanguage(newLang);
+                                                    }}
                                                     className="bg-transparent outline-none flex-1 cursor-pointer"
                                                 >
                                                     <option value="en">English (US)</option>
-                                                    <option value="zh">Traditional Chinese</option>
+                                                    <option value="zh">繁體中文</option>
                                                     <option value="es">Español</option>
                                                     <option value="ja">日本語</option>
                                                 </select>
@@ -387,7 +383,6 @@ export default function SettingsPage() {
                             )}
                         </AnimatePresence>
 
-                        {/* Save Button (Global) */}
                         <div className="flex items-center justify-end gap-4 pt-4 border-t border-transparent">
                             <AnimatePresence>
                                 {message && (
@@ -410,7 +405,7 @@ export default function SettingsPage() {
                                 className="px-8 py-3 bg-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:opacity-90 disabled:opacity-50 transition-all shadow-lg flex items-center gap-2"
                             >
                                 {isSaving ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
-                                {isSaving ? 'Saving Checkpoints...' : 'Save Changes'}
+                                {isSaving ? t('settings.messages.saving') : t('common.save')}
                             </button>
                         </div>
                     </div>

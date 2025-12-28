@@ -8,11 +8,13 @@ import { Loader2, Folder, Search, Globe, User as UserIcon, ArrowLeft, Heart, Sha
 import { useTheme } from 'next-themes';
 import { getIconComponent, getColorClasses, ICON_OPTIONS } from '@/lib/project-utils';
 import Sidebar from '@/components/Sidebar';
+import { useLanguage } from '@/context/LanguageContext';
 
 export default function ExplorePage() {
     const { user, loading } = useAuth(); // Auth optional for exploring? Maybe. Let's redirect to login for consistency for now, or allow guests? User said "Public browser". Usually implies public access. But for simplicity let's require auth or handle null user gracefully.
     const router = useRouter();
     const { theme } = useTheme();
+    const { t } = useLanguage();
 
     const [projects, setProjects] = useState<ProjectData[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -59,7 +61,7 @@ export default function ExplorePage() {
                     <div className="flex items-center space-x-4">
                         {/* Removed Back button as Sidebar handles nav */}
                         <div className="flex items-center space-x-3">
-                            <span className="text-xl font-bold tracking-tight font-serif">Community Explore</span>
+                            <span className="text-xl font-bold tracking-tight font-serif">{t('explore.title')}</span>
                         </div>
                     </div>
 
@@ -69,7 +71,7 @@ export default function ExplorePage() {
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground group-focus-within:text-blue-500 transition-colors" size={18} />
                             <input
                                 type="text"
-                                placeholder="Search public projects, tags, or descriptions..."
+                                placeholder={t('explore.searchPlaceholder')}
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                                 className="w-full bg-neutral-100 dark:bg-neutral-800/50 border-none rounded-full py-2 pl-10 pr-4 focus:ring-2 focus:ring-blue-500 transition-all outline-none"
@@ -98,9 +100,9 @@ export default function ExplorePage() {
 
                 <main className="max-w-7xl mx-auto px-6 py-12">
                     <div className="mb-10 text-center">
-                        <h1 className="text-4xl font-bold mb-4 font-serif">Discover Community Research</h1>
+                        <h1 className="text-4xl font-bold mb-4 font-serif">{t('explore.discoverTitle')}</h1>
                         <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-                            Browse public knowledge bases, research maps, and paper collections shared by the Venalium community.
+                            {t('explore.discoverSubtitle')}
                         </p>
                     </div>
 

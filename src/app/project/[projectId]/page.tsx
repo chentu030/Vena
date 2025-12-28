@@ -19,6 +19,7 @@ import { useTheme } from 'next-themes';
 import { Loader2, Moon, Sun, SidebarClose, SidebarOpen, Command, FileText, Map as MapIcon, X, BookOpen, Search as SearchIcon, ArrowLeft } from 'lucide-react';
 import { saveDocument, loadCollection, deleteDocument, CollectionName, saveProjectData, loadProjectData, getProjectDetails, ProjectData } from '@/lib/firestore';
 import { getIconComponent, getColorClasses } from '@/lib/project-utils';
+import { useLanguage } from '@/context/LanguageContext';
 
 interface SearchConfig {
     keywords: string;
@@ -44,6 +45,7 @@ export default function ProjectWorkspace() {
 
 
     const { theme, setTheme } = useTheme();
+    const { t } = useLanguage();
 
     const [projectDetails, setProjectDetails] = useState<ProjectData | null>(null);
 
@@ -205,7 +207,7 @@ export default function ProjectWorkspace() {
             // Add a welcoming system message
             const welcomeMsg: Message = {
                 role: 'system',
-                content: `👋 Welcome! Your search parameters have been configured based on your request.`
+                content: `👋 ${t('project.intent.welcome')}`
             };
             setMessages([welcomeMsg]);
 
@@ -242,7 +244,7 @@ export default function ProjectWorkspace() {
         // Add a welcoming system message
         const welcomeMsg: Message = {
             role: 'system',
-            content: `👋 Welcome! I'm analyzing your topic: "${topic}" to set up your search parameters.`
+            content: `👋 ${t('project.intent.analyzing')}`
         };
         setMessages([welcomeMsg]);
 
@@ -428,12 +430,21 @@ export default function ProjectWorkspace() {
 
         // 顯示群組資訊
         const groupInfo = config.newGroupName
-            ? ` → New group: "${config.newGroupName}"`
+            ? ` → ${t('search.groupLabel')}: "${config.newGroupName}"`
             : config.targetGroupId
-                ? ` → Group: "${researchGroups.find(g => g.id === config.targetGroupId)?.name || 'Selected'}"`
+                ? ` → ${t('search.groupLabel')}: "${researchGroups.find(g => g.id === config.targetGroupId)?.name || t('research.batch.selected')}"`
                 : '';
 
-        const newMessages = [...messages, { role: 'system', content: `🔍 Starting multi-language literature search for: "${config.keywords}" in ${languageNames} (${config.scopusCount} Scopus, ${config.geminiCount} Gemini)...${groupInfo}` }];
+        const newMessages = [...messages, {
+            role: 'system',
+            content: t('search.status.starting', {
+                keywords: config.keywords,
+                languages: languageNames,
+                scopusCount: config.scopusCount,
+                geminiCount: config.geminiCount,
+                groupInfo
+            })
+        }];
         setMessages(newMessages);
 
         // Start Abort Controller
@@ -455,7 +466,7 @@ export default function ProjectWorkspace() {
                     return { 'en': keywords };
                 }
 
-                setLoadingStatus(`🌐 Translating keywords to ${targetLanguages.length} languages...`);
+                setLoadingStatus(t('search.status.translating', { count: targetLanguages.length }));
 
                 const translationPrompt = `Translate the following academic search keywords into multiple languages.
 Keywords: "${keywords}"
@@ -829,7 +840,7 @@ Rules:
                 });
 
                 if (targetPapers.length === 0) {
-                    setMessages(prev => [...prev, { role: 'model', content: "Selected groups contain no papers." }]);
+                    setMessages(prev => [...prev, { role: 'model', content: t('research.group.no_papers') }]);
                     setIsLoading(false);
                     return;
                 }
@@ -838,7 +849,7 @@ Rules:
                 if (text.includes("撰寫研究方法與理論架構文章") || text.includes("Draft Research Methods") || text.includes("Research Methods") || text.includes("撰寫研究計畫書") || text.includes("Draft Research Proposal")) {
 
                     const isFullProposal = text.includes("撰寫研究計畫書") || text.includes("Draft Research Proposal") || text.includes("撰寫研究方法與理論架構文章");
-                    const statusText = isFullProposal ? "Drafting Full Research Proposal..." : "Drafting Research Methods & Theory article...";
+                    const statusText = isFullProposal ? t('manuscript.status.drafting_proposal') : t('manuscript.status.drafting_methods');
 
                     newMessages.push({ role: 'system', content: `📝 ${statusText} with Gemini 3.0 Pro...` });
                     setMessages([...newMessages]);
@@ -861,7 +872,7 @@ Rules:
                     let methodologyContent = ""; // Store methodology content for Mermaid generation
 
                     for (const section of sectionsToGenerate) {
-                        setLoadingStatus(`Drafting: ${section.title}...`);
+                        setLoadingStatus(t('manuscript.status.drafting_section', { section: section.title }));
 
                         const prompt = generateSectionPrompt(section.id, projectDetails?.name || "Target Topic", targetPapers, section.sectionNumber);
 
@@ -873,7 +884,7 @@ Rules:
                         for (let attempt = 1; attempt <= MAX_RETRIES && !sectionSuccess; attempt++) {
                             try {
                                 if (attempt > 1) {
-                                    setLoadingStatus(`Retrying ${section.title} (Attempt ${attempt}/${MAX_RETRIES})...`);
+                                    setLoadingStatus(t('manuscript.status.retrying_section', { section: section.title, attempt, max: MAX_RETRIES }));
                                 }
 
                                 const res = await fetch('/api/gemini', {
@@ -901,7 +912,7 @@ Rules:
                             } catch (err) {
                                 console.error(`Attempt ${attempt} failed for section ${section.id}:`, err);
                                 if (attempt === MAX_RETRIES) {
-                                    setMessages(prev => [...prev, { role: 'model', content: `⚠️ Failed to generate section after ${MAX_RETRIES} attempts: ${section.title}` }]);
+                                    setMessages(prev => [...prev, { role: 'model', content: t('manuscript.error.section_failed', { section: section.title, retries: MAX_RETRIES }) }]);
                                 }
                             }
                         }
@@ -930,14 +941,14 @@ Rules:
 
                         // If this was the methodology section, generate a dedicated Mermaid diagram with retry
                         if (section.id === 'methodology' && methodologyContent) {
-                            setLoadingStatus(`Designing Research Framework Diagram...`);
+                            setLoadingStatus(t('manuscript.status.designing_diagram'));
 
                             let mermaidSuccess = false;
 
                             for (let mermaidAttempt = 1; mermaidAttempt <= MAX_RETRIES && !mermaidSuccess; mermaidAttempt++) {
                                 try {
                                     if (mermaidAttempt > 1) {
-                                        setLoadingStatus(`Retrying Mermaid diagram (Attempt ${mermaidAttempt}/${MAX_RETRIES})...`);
+                                        setLoadingStatus(t('manuscript.status.retrying_diagram', { attempt: mermaidAttempt, max: MAX_RETRIES }));
                                     }
 
                                     const mermaidPrompt = generateMermaidPrompt(projectDetails?.name || "Target Topic", methodologyContent);
@@ -980,7 +991,7 @@ Rules:
                                     const isValidMermaid = mermaidCode.includes('```mermaid') && mermaidCode.length > 30;
 
                                     if (isValidMermaid) {
-                                        const mermaidBlock = `\n\n### 研究架構圖 (Research Framework)\n\n${mermaidCode}\n`;
+                                        const mermaidBlock = `\n\n### ${t('manuscript.diagram.title')}\n\n${mermaidCode}\n`;
                                         fullGeneratedContent += mermaidBlock;
                                         setMainContent(prev => (prev || '') + mermaidBlock);
                                         console.log("Mermaid block added successfully");
@@ -990,7 +1001,7 @@ Rules:
 
                                         // Still try to add it if it looks somewhat like code, but add a warning
                                         if (mermaidCode.length > 20) {
-                                            const rawBlock = `\n\n### 研究架構圖 (Research Framework)\n\n> System Warning: Mermaid Diagram generation was imperfect.\n\n\`\`\`mermaid\n${mermaidCode.replace(/```/g, '')}\n\`\`\`\n`;
+                                            const rawBlock = `\n\n### ${t('manuscript.diagram.title')}\n\n> ${t('manuscript.diagram.warning')}\n\n\`\`\`mermaid\n${mermaidCode.replace(/```/g, '')}\n\`\`\`\n`;
                                             fullGeneratedContent += rawBlock;
                                             setMainContent(prev => (prev || '') + rawBlock);
                                             mermaidSuccess = true; // Mark as success so we don't retry unnecessarily if model is just confused
@@ -1014,13 +1025,13 @@ Rules:
                         const docId = currentManuscriptId || `manuscript_${Date.now()}`;
                         const title = currentManuscriptId
                             ? savedManuscripts.find(m => m.id === currentManuscriptId)?.title
-                            : `Research Proposal Draft ${new Date().toLocaleDateString()}`;
+                            : t('manuscript.default_title', { date: new Date().toLocaleDateString() });
 
                         const finalContent = (currentManuscriptId ? (mainContent || '') : '') + fullGeneratedContent;
 
                         // If appending to existing, make sure we use the right base. 
                         // Actually, setMainContent was appending locally. Let's trust fullGeneratedContent as the *new* part.
-                        // But if we are editing an EXISTING manuscript, we need to append to its *previous* content?
+                        // But if we are editing an EXISTING manuscript, we need to append to its *previous* content.
                         // The loop above did: setMainContent(prev => (prev || '') + newSectionBlock);
                         // So 'mainContent' state is already updated progressively.
                         // However, 'fullGeneratedContent' only contains the NEW text.
@@ -1037,7 +1048,7 @@ Rules:
 
                         await saveDocument(user!.uid, 'manuscripts', {
                             id: docId,
-                            title: title || 'Untitled Proposal',
+                            title: title || t('manuscript.untitled_proposal'),
                             content: contentToSave,
                             updatedAt: new Date().toISOString()
                         }, projectId);
@@ -1052,7 +1063,7 @@ Rules:
                         setMainContent(contentToSave); // Ensure consistent
                         setSidebarView('main'); // Switch to editor view
 
-                        setMessages(prev => [...prev, { role: 'model', content: `✅ Research Proposal Drafted (${isFullProposal ? 'Full' : 'Methods Only'}). Check the Manuscript Editor.` }]);
+                        setMessages(prev => [...prev, { role: 'model', content: t('manuscript.success.drafted', { type: isFullProposal ? t('manuscript.full') : t('manuscript.methods_only') }) }]);
                     }
 
                     setIsLoading(false);
@@ -1060,21 +1071,21 @@ Rules:
                 }
 
 
-                newMessages.push({ role: 'system', content: `⚡ Starting 2-Phase Mind Map Generation for ${targetPapers.length} papers...` });
+                newMessages.push({ role: 'system', content: t('mindmap.status.starting_generation', { count: targetPapers.length }) });
                 setMessages([...newMessages]);
 
                 // Determine categorization criteria from user input
                 const userRequestLower = text.toLowerCase();
-                let categorizationCriteria = "Research Methodologies or Key Themes";
+                let categorizationCriteria = t('mindmap.criteria.default');
                 if (!userRequestLower.includes("請為選定的資料庫建立心智圖") && !userRequestLower.includes("mind map")) {
                     // If user typed something specific, try to use it as criteria
                     categorizationCriteria = text;
                 }
 
                 // Refine criteria string
-                const criteriaPrompt = `Distinct Categories based on: "${categorizationCriteria}"`;
+                const criteriaPrompt = t('mindmap.criteria.refined', { criteria: categorizationCriteria });
 
-                newMessages.push({ role: 'system', content: `Phase 1: Analyzing ${categorizationCriteria} (Hierarchical) (gemini-3-flash-preview)...` });
+                newMessages.push({ role: 'system', content: t('mindmap.status.phase1', { criteria: categorizationCriteria }) });
                 setMessages([...newMessages]);
 
                 const allPapersContext = targetPapers.map((p: any) => `Title: ${p.title}\nAbstract: ${p.abstract}`).join('\n---\n').substring(0, 100000);
@@ -1090,7 +1101,7 @@ Rules:
                 Each node must have "id" (unique string), "label", and optional "children" array.
                 Example:
                 {
-                  "id": "root", "label": "Overview (${categorizationCriteria})", "children": [
+                  "id": "root", "label": "Category Overview", "children": [
                     { "id": "cat1", "label": "Category 1", "children": [ ... ] },
                     { "id": "cat2", "label": "Category 2", "children": [ ... ] }
                   ]
@@ -1102,7 +1113,7 @@ Rules:
                 3. Create 2-3 levels of depth max.
                 4. Cover all papers.`;
 
-                let hierarchyRoot: any = { id: 'root', label: '研究總覽', children: [] };
+                let hierarchyRoot: any = { id: 'root', label: t('mindmap.root_label'), children: [] };
                 let flatCategories: { id: string, label: string }[] = [];
 
                 try {
@@ -1120,7 +1131,7 @@ Rules:
                     hierarchyRoot = JSON.parse(jsonStr);
 
                     // Fallback if root is missing or wrong format
-                    if (!hierarchyRoot.id) hierarchyRoot = { id: 'root', label: '研究總覽', children: Array.isArray(hierarchyRoot) ? hierarchyRoot : [] };
+                    if (!hierarchyRoot.id) hierarchyRoot = { id: 'root', label: t('mindmap.root_label'), children: Array.isArray(hierarchyRoot) ? hierarchyRoot : [] };
 
                     // Flatten for Phase 2 logic (we need a list of ALL candidate target nodes)
                     const traverse = (node: any) => {
@@ -1133,17 +1144,17 @@ Rules:
                     console.error("Phase 1 Failed", e);
                     // Fallback
                     hierarchyRoot = {
-                        id: 'root', label: '研究總覽',
+                        id: 'root', label: t('mindmap.root_label'),
                         children: [
-                            { id: 'cat_a', label: 'Category A' },
-                            { id: 'cat_b', label: 'Category B' }
+                            { id: 'cat_a', label: t('mindmap.fallback_category_a') },
+                            { id: 'cat_b', label: t('mindmap.fallback_category_b') }
                         ]
                     };
-                    flatCategories = [{ id: 'root', label: 'Root' }, { id: 'cat_a', label: 'Category A' }, { id: 'cat_b', label: 'Category B' }];
+                    flatCategories = [{ id: 'root', label: 'Root' }, { id: 'cat_a', label: t('mindmap.fallback_category_a') }, { id: 'cat_b', label: t('mindmap.fallback_category_b') }];
                 }
 
                 // Phase 2: Assign Papers to Categories (Chunked)
-                newMessages.push({ role: 'system', content: `Phase 2: Assigning papers to ${flatCategories.length} categories...` });
+                newMessages.push({ role: 'system', content: t('mindmap.status.phase2', { count: flatCategories.length }) });
                 setMessages([...newMessages]);
 
                 const chunkSize = 15;
@@ -1246,7 +1257,7 @@ Rules:
                     nodes.push({
                         id: `${idPrefix}p-${assign.paperIndex}`,
                         type: 'reference',
-                        label: `[Paper] #${assign.paperIndex + 1} ${paper.title}`, // Standard Format
+                        label: `[${t('mindmap.paper_label')}] #${assign.paperIndex + 1} ${paper.title}`, // Standard Format
                         parent: finalParent,
                         data: {
                             referenceType: 'paper',
@@ -1461,10 +1472,13 @@ Rules:
 
                     setMessages(prev => [...prev, {
                         role: 'model',
-                        content: `✅ Generated Mind Map with 2-Phase Analysis!\n\nOverview:\n- ${flatCategories.length} Categories Identified\n- ${targetPapers.length} Papers Classified`
+                        content: t('mindmap.success.generated', {
+                            categories: flatCategories.length,
+                            papers: targetPapers.length
+                        })
                     }]);
                 } else {
-                    setMessages(prev => [...prev, { role: 'model', content: "Failed to generate map structure." }]);
+                    setMessages(prev => [...prev, { role: 'model', content: t('mindmap.error.generation_failed') }]);
                 }
 
                 setIsLoading(false);
@@ -1495,7 +1509,7 @@ Rules:
 
             if (isLiteratureSearch) {
                 // Full hybrid search - put results in Research panel
-                newMessages.push({ role: 'system', content: '🔍 Starting hybrid literature search (Scopus + Gemini)...' });
+                newMessages.push({ role: 'system', content: t('search.status.starting_hybrid') });
                 setMessages([...newMessages]);
 
                 // Helper: Generate PDF link
@@ -1559,7 +1573,7 @@ Rules:
 
                 // 2. Parallel Search (Scopus)
                 // Use Grounding with Gemini 3 Pro
-                newMessages.push({ role: 'system', content: `🔍 Searching for: ${keywords.join(', ')}` });
+                newMessages.push({ role: 'system', content: t('search.status.searching_keywords', { keywords: keywords.join(', ') }) });
                 setMessages([...newMessages]);
 
                 const scopusResults = await fetchScopus(keywords.join(' OR '), 10);
@@ -1594,7 +1608,7 @@ Rules:
                 setCurrentResearchResults(combinedResults);
                 setSidebarView('research');
                 setIsLoading(false);
-                setMessages(prev => [...prev, { role: 'model', content: `Found ${combinedResults.length} relevant papers. View them in the Research Panel.` }]);
+                setMessages(prev => [...prev, { role: 'model', content: t('search.status.found_papers', { count: combinedResults.length }) }]);
                 return;
             } else {
                 // Normal Chat
@@ -1621,7 +1635,7 @@ Rules:
 
         } catch (error) {
             console.error(error);
-            setMessages(prev => [...prev, { role: 'model', content: "Sorry, I encountered an error. Please check your API key and connection." }]);
+            setMessages(prev => [...prev, { role: 'model', content: t('chat.error.response_failed') }]);
         } finally {
             setIsLoading(false);
         }
@@ -1812,7 +1826,7 @@ Rules:
                 title = existing.title;
             } else {
                 const aiTitle = await generateAiTitle(paperContent, 'Draft');
-                title = aiTitle || paperContent.split('\n')[0].substring(0, 10) || 'New Draft';
+                title = aiTitle || paperContent.split('\n')[0].substring(0, 10) || t('draft.new_draft');
             }
 
             setSavedDrafts(prev => {
@@ -1858,7 +1872,7 @@ Rules:
             if (existing) {
                 title = existing.title;
             } else {
-                title = `Manuscript ${now.toLocaleDateString()}`;
+                title = t('manuscript.default_title', { date: now.toLocaleDateString() });
                 if (mainContent && mainContent.length > 5) {
                     const firstLine = mainContent.split('\n').find(l => l.trim().length > 0) || '';
                     if (firstLine) title = firstLine.replace(/[#*]/g, '').trim().substring(0, 20);
@@ -2010,7 +2024,7 @@ Rules:
 
             setSavedMaps(prev => {
                 const existing = prev.find(m => m.id === newId);
-                const title = existing?.title || `Map ${now.toLocaleDateString()}`;
+                const title = existing?.title || t('map.default_title', { date: now.toLocaleDateString() });
 
                 const newMap = {
                     id: newId,
@@ -2051,7 +2065,7 @@ Rules:
 
             setSavedChats(prev => {
                 const existing = prev.find(c => c.id === newId);
-                const title = existing?.title || `Chat ${now.toLocaleDateString()}`;
+                const title = existing?.title || t('chat.default_title', { date: now.toLocaleDateString() });
 
                 const newChats = {
                     id: newId,
@@ -2168,7 +2182,7 @@ Rules:
         if (!user || !projectId) return;
         const now = new Date();
         const newId = currentResearchId || now.getTime().toString();
-        const title = `Research ${now.toLocaleDateString()} (${results.length})`;
+        const title = t('research.default_title', { date: now.toLocaleDateString(), count: results.length });
 
         setSavedResearch(prev => {
             const item = {
@@ -2223,7 +2237,7 @@ Rules:
                     router.push(fromPath || '/dashboard');
                 }}
                 className="fixed top-4 left-4 z-[60] p-2 bg-white/50 dark:bg-black/50 backdrop-blur rounded-full hover:bg-white dark:hover:bg-black transition-all shadow-sm border border-border/50"
-                title="Back"
+                title={t('common.back')}
             >
                 <ArrowLeft size={20} />
             </button>
@@ -2286,7 +2300,7 @@ Rules:
             >
                 <div className="bg-white dark:bg-neutral-800 border border-border/50 p-2 rounded-l-xl shadow-lg cursor-grab active:cursor-grabbing">
                     <div className="text-xs font-medium tracking-widest uppercase text-muted-foreground py-2 flex items-center gap-2 font-serif" style={{ writingMode: 'vertical-rl' }}>
-                        <span>History</span>
+                        <span>{t('project.history')}</span>
                     </div>
                 </div>
             </div>
@@ -2336,7 +2350,7 @@ Rules:
                                 <div className={`hidden md:flex flex-col ${sidebarView !== 'none' ? 'hidden' : ''}`}>
                                     <span className="text-xs font-medium max-w-[100px] truncate">{user.displayName || 'User'}</span>
                                     <button onClick={() => signOut()} className="text-[10px] text-muted-foreground hover:text-red-500 text-left transition-colors">
-                                        Sign out
+                                        {t('common.sign_out')}
                                     </button>
                                 </div>
                             </div>
@@ -2347,30 +2361,30 @@ Rules:
                         <button
                             onClick={(e) => { e.stopPropagation(); setSidebarView(sidebarView === 'draft' ? 'none' : 'draft'); }}
                             className={`flex items-center gap-2 px-3 lg:px-4 py-1.5 rounded-full transition-all duration-300 text-sm font-medium ${sidebarView === 'draft' ? 'bg-white dark:bg-black shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-                            title="Draft"
+                            title={t('project.tabs.draft')}
                         >
-                            <FileText size={14} /> <span className={sidebarView !== 'none' ? 'hidden' : 'hidden sm:inline'}>Draft</span>
+                            <FileText size={14} /> <span className={sidebarView !== 'none' ? 'hidden' : 'hidden sm:inline'}>{t('project.tabs.draft')}</span>
                         </button>
                         <button
                             onClick={(e) => { e.stopPropagation(); setSidebarView(sidebarView === 'map' ? 'none' : 'map'); }}
                             className={`flex items-center gap-2 px-3 lg:px-4 py-1.5 rounded-full transition-all duration-300 text-sm font-medium ${sidebarView === 'map' ? 'bg-white dark:bg-black shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-                            title="Mind Map"
+                            title={t('project.tabs.map')}
                         >
-                            <MapIcon size={14} /> <span className={sidebarView !== 'none' ? 'hidden' : 'hidden sm:inline'}>Map</span>
+                            <MapIcon size={14} /> <span className={sidebarView !== 'none' ? 'hidden' : 'hidden sm:inline'}>{t('project.tabs.map')}</span>
                         </button>
                         <button
                             onClick={(e) => { e.stopPropagation(); setSidebarView(sidebarView === 'main' ? 'none' : 'main'); }}
                             className={`flex items-center gap-2 px-3 lg:px-4 py-1.5 rounded-full transition-all duration-300 text-sm font-medium ${sidebarView === 'main' ? 'bg-white dark:bg-black shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-                            title="Manuscript"
+                            title={t('project.tabs.manuscript')}
                         >
-                            <BookOpen size={14} /> <span className={sidebarView !== 'none' ? 'hidden' : 'hidden sm:inline'}>Manuscript</span>
+                            <BookOpen size={14} /> <span className={sidebarView !== 'none' ? 'hidden' : 'hidden sm:inline'}>{t('project.tabs.manuscript')}</span>
                         </button>
                         <button
                             onClick={(e) => { e.stopPropagation(); setSidebarView(sidebarView === 'research' ? 'none' : 'research'); }}
                             className={`flex items-center gap-2 px-3 lg:px-4 py-1.5 rounded-full transition-all duration-300 text-sm font-medium ${sidebarView === 'research' ? 'bg-white dark:bg-black shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-                            title="Research"
+                            title={t('project.tabs.research')}
                         >
-                            <SearchIcon size={14} /> <span className={sidebarView !== 'none' ? 'hidden' : 'hidden sm:inline'}>Research</span>
+                            <SearchIcon size={14} /> <span className={sidebarView !== 'none' ? 'hidden' : 'hidden sm:inline'}>{t('project.tabs.research')}</span>
                         </button>
                     </div>
                 </header>
@@ -2381,12 +2395,12 @@ Rules:
                     {messages.length === 0 && (
                         <div className="min-h-[40vh] flex flex-col justify-end pb-8 animate-fade-in">
                             <h1 className="text-5xl md:text-6xl font-serif font-light tracking-tight mb-4 leading-[1.1] animate-fade-in-up">
-                                What shall we <br />
-                                <span className="italic text-muted-foreground animate-fade-in-up-delay">research today?</span>
+                                {t('project.greeting.what_shall_we')} <br />
+                                <span className="italic text-muted-foreground animate-fade-in-up-delay">{t('project.greeting.research_today')}</span>
                             </h1>
                             <p className="text-lg text-muted-foreground font-light max-w-md">
-                                {projectDetails ? `Project: ${projectDetails.name}. ` : ''}
-                                Ask about a topic, upload a paper, or start a literature review.
+                                {projectDetails ? t('project.greeting.project_name', { name: projectDetails.name }) : ''}
+                                {t('project.greeting.description')}
                             </p>
                         </div>
                     )}

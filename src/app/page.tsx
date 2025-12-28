@@ -11,10 +11,12 @@ import { ArrowRight, Sparkles, Zap, Users, Search, Loader2 } from 'lucide-react'
 import { createProject } from '@/lib/firestore';
 import LandingPage from '@/components/LandingPage';
 import VenaliumLoading from '@/components/VenaliumLoading';
+import { useLanguage } from '@/context/LanguageContext';
 
 export default function Home() {
     const { user, loading } = useAuth();
     const router = useRouter();
+    const { t } = useLanguage();
     const [searchTerm, setSearchTerm] = useState('');
     const [isCreating, setIsCreating] = useState(false);
     const [creatingStatus, setCreatingStatus] = useState('');
@@ -180,7 +182,7 @@ Rules:
                             transition={{ delay: 0.4 }}
                             className="mt-2 text-sm text-muted-foreground"
                         >
-                            AI is setting up your research workspace...
+                            {t('dashboard.smartCreate.settingUp')}
                         </motion.p>
                     </motion.div>
                 )}
@@ -206,17 +208,17 @@ Rules:
                                         Venalium<span className="text-blue-600">.</span>
                                     </h1>
                                     <div className="flex items-center justify-center gap-4 text-xs font-medium tracking-[0.3em] uppercase text-neutral-500 dark:text-neutral-400">
-                                        <span>Research</span>
+                                        <span>{t('home.research')}</span>
                                         <span className="w-1 h-1 bg-neutral-300 rounded-full"></span>
-                                        <span>Intelligence</span>
+                                        <span>{t('home.intelligence')}</span>
                                         <span className="w-1 h-1 bg-neutral-300 rounded-full"></span>
-                                        <span>Future</span>
+                                        <span>{t('home.future')}</span>
                                     </div>
                                 </div>
 
                                 <p className="text-xl md:text-2xl text-neutral-600 dark:text-neutral-300 max-w-2xl mb-10 font-light leading-relaxed">
-                                    Welcome back{user?.displayName ? `, ${user.displayName}` : ''}. <br />
-                                    What do you want to research?
+                                    {t('home.welcomeBack')}{user?.displayName ? `, ${user.displayName}` : ''}. <br />
+                                    {t('home.whatToResearch')}
                                 </p>
 
                                 {/* Search Box */}
@@ -230,7 +232,7 @@ Rules:
                                             type="text"
                                             value={searchTerm}
                                             onChange={(e) => setSearchTerm(e.target.value)}
-                                            placeholder="Enter a research topic to create a new project..."
+                                            placeholder={t('home.searchPlaceholder')}
                                             disabled={isCreating}
                                             className="w-full bg-transparent border-none py-4 px-4 text-lg outline-none placeholder:text-neutral-400 dark:placeholder:text-neutral-500 text-neutral-900 dark:text-white"
                                             autoFocus
@@ -250,32 +252,31 @@ Rules:
                                         onClick={() => router.push('/dashboard')}
                                         className="rounded-full bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 px-8 py-4 text-base font-medium shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex items-center gap-2"
                                     >
-                                        Go to Dashboard
+                                        {t('home.goToDashboard')}
                                     </button>
                                     <button
                                         onClick={() => router.push('/explore')}
                                         className="rounded-full bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white px-8 py-4 text-base font-medium shadow-sm hover:shadow-md hover:-translate-y-1 transition-all duration-300"
                                     >
-                                        Explore Projects
+                                        {t('home.exploreProjects')}
                                     </button>
                                 </div>
-
                                 {/* Feature Briefs */}
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-10 text-left w-full max-w-5xl">
                                     {[
                                         {
-                                            title: "Analysis",
-                                            desc: "Deep AI-powered insights",
+                                            title: t('home.features.analysis.title'),
+                                            desc: t('home.features.analysis.desc'),
                                             icon: Sparkles
                                         },
                                         {
-                                            title: "Knowledge",
-                                            desc: "Interactive visual graphs",
+                                            title: t('home.features.knowledge.title'),
+                                            desc: t('home.features.knowledge.desc'),
                                             icon: Zap
                                         },
                                         {
-                                            title: "Collaboration",
-                                            desc: "Real-time team sync",
+                                            title: t('home.features.collaboration.title'),
+                                            desc: t('home.features.collaboration.desc'),
                                             icon: Users
                                         }
                                     ].map((item, i) => (

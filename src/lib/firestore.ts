@@ -1346,7 +1346,7 @@ export interface UserProfile {
     website?: string;
 
     // Preferences
-    language?: 'en' | 'zh' | 'es' | 'fr' | 'de' | 'ja';
+    language?: 'en' | 'zh' | 'es' | 'ja';
     themePreference?: 'system' | 'light' | 'dark';
     backgroundIntensity?: number; // 0-100
 }

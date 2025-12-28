@@ -2,23 +2,26 @@
 
 import React, { useState } from 'react';
 import { LayoutDashboard, Compass, Settings, LogOut, ChevronLeft, ChevronRight, Users, MessageSquare, Sun, Moon, Home, Globe } from 'lucide-react';
-import { useRouter, usePathname } from 'next/navigation';
-import { useTheme } from 'next-themes';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
+import { useTheme } from 'next-themes';
+import { useLanguage } from '@/context/LanguageContext';
 
 export default function Sidebar() {
-    const router = useRouter();
-    const pathname = usePathname();
-    const { signOut } = useAuth();
-    const { theme, setTheme } = useTheme();
     const [isCollapsed, setIsCollapsed] = useState(true);
+    const pathname = usePathname();
+    const router = useRouter();
+    const { user, signOut } = useAuth();
+    const { theme, setTheme } = useTheme();
+    const { t } = useLanguage();
 
     const menuItems = [
-        { name: 'Home', icon: Home, path: '/' },
-        { name: 'My Projects', icon: LayoutDashboard, path: '/dashboard' },
-        { name: 'Teams', icon: Users, path: '/teams' },
-        { name: 'Community', icon: Globe, path: '/community' },
-        { name: 'Explore', icon: Compass, path: '/explore' },
+        { name: t('sidebar.home'), icon: Home, path: '/' },
+        { name: t('sidebar.myProjects'), icon: LayoutDashboard, path: '/dashboard' },
+        { name: t('sidebar.teams'), icon: Users, path: '/teams' },
+        { name: t('sidebar.community'), icon: Globe, path: '/community' },
+        { name: t('sidebar.explore'), icon: Compass, path: '/explore' },
     ];
 
     return (
@@ -65,34 +68,34 @@ export default function Sidebar() {
                 <button
                     onClick={() => router.push('/feedback')}
                     className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'space-x-3 px-4'} py-3 rounded-xl text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors`}
-                    title={isCollapsed ? "Feedback" : ""}
+                    title={isCollapsed ? t('sidebar.feedback') : ""}
                 >
                     <MessageSquare size={20} />
-                    {!isCollapsed && <span>Feedback</span>}
+                    {!isCollapsed && <span>{t('sidebar.feedback')}</span>}
                 </button>
                 <button
                     onClick={() => router.push('/settings')}
                     className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'space-x-3 px-4'} py-3 rounded-xl text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors`}
-                    title={isCollapsed ? "Settings" : ""}
+                    title={isCollapsed ? t('sidebar.settings') : ""}
                 >
                     <Settings size={20} />
-                    {!isCollapsed && <span>Settings</span>}
+                    {!isCollapsed && <span>{t('sidebar.settings')}</span>}
                 </button>
                 <button
                     onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
                     className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'space-x-3 px-4'} py-3 rounded-xl text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors`}
-                    title={isCollapsed ? "Toggle Theme" : ""}
+                    title={isCollapsed ? (theme === 'dark' ? t('sidebar.lightMode') : t('sidebar.darkMode')) : ""}
                 >
                     {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-                    {!isCollapsed && <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>}
+                    {!isCollapsed && <span>{theme === 'dark' ? t('sidebar.lightMode') : t('sidebar.darkMode')}</span>}
                 </button>
                 <button
                     onClick={() => signOut()}
                     className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'space-x-3 px-4'} py-3 rounded-xl text-muted-foreground hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 transition-colors`}
-                    title={isCollapsed ? "Sign Out" : ""}
+                    title={isCollapsed ? t('sidebar.signOut') : ""}
                 >
                     <LogOut size={20} />
-                    {!isCollapsed && <span>Sign Out</span>}
+                    {!isCollapsed && <span>{t('sidebar.signOut')}</span>}
                 </button>
             </div>
         </aside>

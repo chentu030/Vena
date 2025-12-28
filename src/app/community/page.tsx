@@ -17,6 +17,7 @@ import {
 import { getPdfStorage } from '@/lib/firebase-storage';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { v4 as uuidv4 } from 'uuid';
+import { useLanguage } from '@/context/LanguageContext';
 
 type SortType = 'hot' | 'new' | 'top';
 type PostType = 'text' | 'link' | 'paper' | 'image' | 'video' | 'audio' | 'mixed';
@@ -24,6 +25,7 @@ type PostType = 'text' | 'link' | 'paper' | 'image' | 'video' | 'audio' | 'mixed
 export default function CommunityPage() {
     const router = useRouter();
     const { user, loading } = useAuth();
+    const { t } = useLanguage();
     const storage = getPdfStorage();
     const [posts, setPosts] = useState<CommunityPost[]>([]);
     const [communities, setCommunities] = useState<Community[]>([]);
@@ -364,7 +366,7 @@ export default function CommunityPage() {
                                         {currentCommunity?.displayName}
                                     </span>
                                 ) : (
-                                    "Community"
+                                    t('sidebar.community')
                                 )}
                             </h1>
                             <p className="text-neutral-500 dark:text-neutral-400 max-w-xl">
@@ -400,7 +402,7 @@ export default function CommunityPage() {
                                     </div>
                                     <div className="flex-1">
                                         <div className="text-neutral-500 dark:text-neutral-400 text-lg font-light">
-                                            Share your research...
+                                            {t('community.writePlaceholder')}
                                         </div>
                                     </div>
                                     <div className="flex gap-2">

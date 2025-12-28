@@ -10,11 +10,13 @@ import { ICON_OPTIONS, COLOR_OPTIONS, getIconComponent, getColorClasses } from '
 import Sidebar from '@/components/Sidebar';
 import VenaliumLoading from '@/components/VenaliumLoading';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useLanguage } from '@/context/LanguageContext';
 
 export default function Dashboard() {
     const { user, loading, signOut } = useAuth();
     const router = useRouter();
     const { theme, setTheme } = useTheme();
+    const { t } = useLanguage();
 
     const [projects, setProjects] = useState<ProjectData[]>([]);
     const [isLoadingProjects, setIsLoadingProjects] = useState(true);
@@ -367,7 +369,7 @@ Rules:
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground group-focus-within:text-blue-500 transition-colors" size={18} />
                             <input
                                 type="text"
-                                placeholder="Search projects..."
+                                placeholder={t('dashboard.searchPlaceholder')}
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                                 className="w-full bg-neutral-100 dark:bg-neutral-800/50 border-none rounded-full py-2 pl-10 pr-4 focus:ring-2 focus:ring-blue-500 transition-all outline-none"
@@ -401,8 +403,8 @@ Rules:
                     {/* ... (existing main content) ... */}
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
                         <div>
-                            <h1 className="text-3xl font-bold mb-2 font-serif">My Projects</h1>
-                            <p className="text-muted-foreground">Manage your research workspaces</p>
+                            <h1 className="text-3xl font-bold mb-2 font-serif">{t('dashboard.title')}</h1>
+                            <p className="text-muted-foreground">{t('dashboard.subtitle')}</p>
                         </div>
 
                         <button
@@ -410,7 +412,7 @@ Rules:
                             className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-full font-medium flex items-center gap-2 transition-all shadow-lg shadow-blue-500/20 hover:shadow-blue-500/30"
                         >
                             <Plus size={18} />
-                            New Project
+                            {t('dashboard.createProject')}
                         </button>
                     </div>
 
@@ -418,10 +420,10 @@ Rules:
                     <div className="mb-12 relative overflow-hidden rounded-3xl bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/10 dark:to-indigo-900/10 border border-blue-100 dark:border-blue-900/30 p-8 md:p-12 text-center animate-fade-in shadow-sm">
                         <div className="relative z-10 max-w-2xl mx-auto">
                             <h2 className="text-2xl md:text-4xl font-serif font-medium mb-4 text-blue-900 dark:text-blue-100">
-                                What do you want to research?
+                                {t('dashboard.smartCreate.title')}
                             </h2>
                             <p className="text-neutral-600 dark:text-neutral-400 mb-8 max-w-lg mx-auto">
-                                Enter a topic and let AI set up your workspace, find relevant papers, and organize your study.
+                                {t('dashboard.smartCreate.subtitle')}
                             </p>
 
                             <form onSubmit={handleSmartCreate} className="relative max-w-xl mx-auto">
@@ -430,7 +432,7 @@ Rules:
                                     type="text"
                                     value={researchTopic}
                                     onChange={(e) => setResearchTopic(e.target.value)}
-                                    placeholder="e.g. Biodiversity credit, High-entropy alloys..."
+                                    placeholder={t('dashboard.smartCreate.placeholder')}
                                     className="w-full pl-12 pr-4 py-4 rounded-full border-2 border-blue-100 dark:border-blue-800 bg-white/80 dark:bg-black/50 backdrop-blur-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all text-lg shadow-sm"
                                     disabled={isCreatingSmart}
                                 />
@@ -443,11 +445,11 @@ Rules:
                                         {isCreatingSmart ? (
                                             <>
                                                 <Loader2 size={18} className="animate-spin" />
-                                                Setting up...
+                                                {t('dashboard.smartCreate.settingUp')}
                                             </>
                                         ) : (
                                             <>
-                                                Start <Compass size={16} />
+                                                {t('dashboard.smartCreate.start')} <Compass size={16} />
                                             </>
                                         )}
                                     </button>
@@ -469,8 +471,8 @@ Rules:
                             {filteredProjects.length === 0 && (
                                 <div className="col-span-full py-20 text-center border-2 border-dashed border-border rounded-3xl bg-neutral-50/50 dark:bg-neutral-900/20">
                                     <Folder size={48} className="mx-auto text-muted-foreground mb-4 opacity-50" />
-                                    <h3 className="text-lg font-medium mb-1">No projects found</h3>
-                                    <p className="text-muted-foreground mb-6">Create a new project or try a different search</p>
+                                    <h3 className="text-lg font-medium mb-1">{t('dashboard.noProjects')}</h3>
+                                    <p className="text-muted-foreground mb-6">{t('dashboard.createFirst')}</p>
                                 </div>
                             )}
 

@@ -7,11 +7,13 @@ import { getUserTeams, createTeam, TeamData } from '@/lib/firestore'; // You'll 
 import { Loader2, Plus, Users, Search, X, MessageSquare, Briefcase } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import Sidebar from '@/components/Sidebar';
+import { useLanguage } from '@/context/LanguageContext';
 
 export default function TeamsDashboard() {
     const { user, loading } = useAuth();
     const router = useRouter();
     const { theme } = useTheme();
+    const { t } = useLanguage();
 
     const [teams, setTeams] = useState<TeamData[]>([]);
     const [isLoadingTeams, setIsLoadingTeams] = useState(true);
@@ -91,9 +93,9 @@ export default function TeamsDashboard() {
 
                 <main className="flex-1 p-8 overflow-y-auto max-w-7xl mx-auto w-full">
                     <div className="mb-10 text-center">
-                        <h1 className="text-4xl font-bold mb-4 font-serif">My Teams</h1>
+                        <h1 className="text-4xl font-bold mb-4 font-serif">{t('teams.myTeams')}</h1>
                         <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-                            Collaborate with your research group
+                            {t('teams.subtitle')}
                         </p>
                     </div>
 

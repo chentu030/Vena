@@ -16,6 +16,8 @@ import { AuthProvider } from '@/lib/auth';
 import { AnalysisProvider } from '@/context/AnalysisContext';
 import ClientAnalysisWidget from '@/components/ClientAnalysisWidget';
 
+import { LanguageProvider } from '@/context/LanguageContext';
+
 export default function RootLayout({
   children,
 }: {
@@ -69,10 +71,12 @@ export default function RootLayout({
         />
         <ThemeProvider>
           <AuthProvider>
-            <AnalysisProvider>
-              {children}
-              <ClientAnalysisWidget />
-            </AnalysisProvider>
+            <LanguageProvider>
+              <AnalysisProvider>
+                {children}
+                <ClientAnalysisWidget />
+              </AnalysisProvider>
+            </LanguageProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useLanguage } from '@/context/LanguageContext';
 import { Search, MessageSquare, X, ArrowRight, Globe, Check, ChevronDown, FolderPlus, Folder } from 'lucide-react';
 
 interface SearchConfig {
@@ -47,6 +48,7 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
     const [startYear, setStartYear] = useState(config.dateRange?.start || 2023);
     const [endYear, setEndYear] = useState(config.dateRange?.end || 2026);
     const [isConfirmed, setIsConfirmed] = useState(false);
+    const { t } = useLanguage();
 
     // 語言選擇狀態 - 預設選擇英文 或 Config 中的語言
     const [selectedLanguages, setSelectedLanguages] = useState<string[]>(config.languages || ['en']);
@@ -81,11 +83,11 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
         if (selectedGroupIds.length > 0) {
             if (selectedGroupIds.length === 1) {
                 const group = groups.find(g => g.id === selectedGroupIds[0]);
-                return group ? group.name : 'Select Groups';
+                return group ? group.name : t('search.groups');
             }
-            return `${selectedGroupIds.length} Groups Selected`;
+            return `${selectedGroupIds.length} ${t('research.batch.selected')}`;
         }
-        return 'Select Target Groups';
+        return t('search.groups');
     };
 
     const toggleGroupSelection = (groupId: string) => {
@@ -119,10 +121,10 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
         if (selectedLanguages.length === 0) return 'Select Languages';
         if (selectedLanguages.length === 1) {
             const lang = LANGUAGE_OPTIONS.find(l => l.id === selectedLanguages[0]);
-            return lang ? `${lang.flag} ${lang.name}` : 'Select Languages';
+            return lang ? `${lang.flag} ${lang.name}` : t('search.languages');
         }
         // Use text flags or just count
-        return `${selectedLanguages.length} Languages`;
+        return `${selectedLanguages.length} Languages`; // Can be improved later if needed
     };
 
     if (isConfirmed) {
@@ -133,8 +135,8 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                     <Search size={16} className="text-white" />
                 </div>
                 <div>
-                    <div className="font-medium text-blue-900 dark:text-blue-100">Search Started</div>
-                    <div className="text-xs text-blue-700 dark:text-blue-300">Searching for "{keywords}" in {langNames}...</div>
+                    <div className="font-medium text-blue-900 dark:text-blue-100">{t('search.started')}</div>
+                    <div className="text-xs text-blue-700 dark:text-blue-300">{t('search.searching', { keywords, languages: langNames })}</div>
                 </div>
             </div>
         );
@@ -148,8 +150,8 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                     <Search size={16} />
                 </div>
                 <div>
-                    <h3 className="font-semibold text-sm text-foreground">Literature Search Detected</h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">The AI thinks you want to find papers.</p>
+                    <h3 className="font-semibold text-sm text-foreground">{t('search.title')}</h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">{t('search.subtitle')}</p>
                 </div>
             </div>
 
@@ -157,7 +159,7 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
             <div className="p-4 space-y-4">
                 {/* Keywords Input */}
                 <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground ml-1">Target Keywords</label>
+                    <label className="text-xs font-medium text-muted-foreground ml-1">{t('search.keywords')}</label>
                     <input
                         type="text"
                         value={keywords}
@@ -169,7 +171,7 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                 {/* Counts Grid */}
                 <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-muted-foreground ml-1">Scopus Papers</label>
+                        <label className="text-xs font-medium text-muted-foreground ml-1">{t('search.scopusCount')}</label>
                         <input
                             type="number"
                             min={1}
@@ -180,7 +182,7 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                         />
                     </div>
                     <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-muted-foreground ml-1">Gemini Papers</label>
+                        <label className="text-xs font-medium text-muted-foreground ml-1">{t('search.geminiCount')}</label>
                         <input
                             type="number"
                             min={0}
@@ -195,7 +197,7 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                 {/* Date Range Grid */}
                 <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-muted-foreground ml-1">Start Year</label>
+                        <label className="text-xs font-medium text-muted-foreground ml-1">{t('search.startYear')}</label>
                         <input
                             type="number"
                             min={1900}
@@ -206,7 +208,7 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                         />
                     </div>
                     <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-muted-foreground ml-1">End Year</label>
+                        <label className="text-xs font-medium text-muted-foreground ml-1">{t('search.endYear')}</label>
                         <input
                             type="number"
                             min={1900}
@@ -222,7 +224,7 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                 <div className="space-y-1.5">
                     <label className="text-xs font-medium text-muted-foreground ml-1 flex items-center gap-1">
                         <Globe size={12} />
-                        Search Languages
+                        {t('search.languages')}
                     </label>
                     <div className="relative">
                         <button
@@ -256,7 +258,7 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                     </div>
                     {selectedLanguages.length > 1 && (
                         <p className="text-[10px] text-muted-foreground ml-1">
-                            💡 Keywords will be translated to each selected language for broader search
+                            💡 {t('search.languageWarning')}
                         </p>
                     )}
                 </div>
@@ -266,7 +268,7 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                     <div className="space-y-1.5">
                         <label className="text-xs font-medium text-muted-foreground ml-1 flex items-center gap-1">
                             <Folder size={12} />
-                            Target Groups
+                            {t('search.groups')}
                         </label>
                         <div className="relative">
                             <button
@@ -314,7 +316,7 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                                             className={`w-full px-3 py-2 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2 transition-colors text-green-600 dark:text-green-400 ${isCreatingNewGroup ? 'bg-green-50 dark:bg-green-900/20' : ''}`}
                                         >
                                             <FolderPlus size={14} className="shrink-0" />
-                                            <span className="flex-1">Create New Group...</span>
+                                            <span className="flex-1">{t('search.newGroup')}</span>
                                         </button>
                                     </div>
                                 </div>
@@ -327,7 +329,7 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                                 type="text"
                                 value={newGroupName}
                                 onChange={(e) => setNewGroupName(e.target.value)}
-                                placeholder="Enter new group name..."
+                                placeholder={t('search.enterGroupName')}
                                 className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-800 border border-green-500 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 transition-all mt-1"
                                 autoFocus
                             />
@@ -343,14 +345,14 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                         className="text-xs font-medium text-muted-foreground ml-1 flex items-center gap-1 hover:text-foreground transition-colors"
                     >
                         <ChevronDown size={12} className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
-                        Additional Instructions for Gemini (Optional)
+                        {t('search.additionalInstructions')}
                     </button>
 
                     {showAdvanced && (
                         <textarea
                             value={additionalInstructions}
                             onChange={(e) => setAdditionalInstructions(e.target.value)}
-                            placeholder="e.g., Focus on empirical studies, exclude review papers, prioritize recent publications from top journals..."
+                            placeholder={t('search.instructionPlaceholder')}
                             className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-800 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all min-h-[60px] resize-none"
                             rows={2}
                         />
@@ -359,7 +361,7 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
 
                 {/* Original Request Preview */}
                 <div className="bg-neutral-50 dark:bg-neutral-800 rounded-lg p-3 text-xs text-muted-foreground border border-border/50">
-                    <span className="font-semibold text-blue-600 dark:text-blue-400">Original Request:</span> "{config.originalMessage}"
+                    <span className="font-semibold text-blue-600 dark:text-blue-400">{t('search.originalRequest')}</span> "{config.originalMessage}"
                 </div>
 
                 {/* Actions */}
@@ -368,7 +370,7 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                         onClick={handleConfirm}
                         className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 shadow-sm"
                     >
-                        <Search size={16} /> Start Research
+                        <Search size={16} /> {t('search.start')}
                     </button>
 
                     <div className="grid grid-cols-2 gap-2">
@@ -376,13 +378,13 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                             onClick={() => onCancel(config, true)}
                             className="py-2 bg-white dark:bg-neutral-800 border border-border hover:bg-neutral-50 dark:hover:bg-neutral-700 text-foreground rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
                         >
-                            <MessageSquare size={16} /> Chat Only
+                            <MessageSquare size={16} /> {t('search.chatOnly')}
                         </button>
                         <button
                             onClick={() => onCancel(config, false)}
                             className="py-2 bg-white dark:bg-neutral-800 border border-border hover:bg-neutral-50 dark:hover:bg-neutral-700 text-muted-foreground hover:text-red-500 rounded-lg text-sm font-medium transition-colors"
                         >
-                            Cancel
+                            {t('search.cancel')}
                         </button>
                     </div>
                 </div>

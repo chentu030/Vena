@@ -6,10 +6,12 @@ import { useAuth } from '@/lib/auth';
 import { ArrowLeft, Upload, Send, Loader2, Image as ImageIcon, X } from 'lucide-react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useLanguage } from '@/context/LanguageContext';
 
 export default function FeedbackPage() {
     const { user } = useAuth();
     const router = useRouter();
+    const { t } = useLanguage();
     const [comment, setComment] = useState('');
     const [files, setFiles] = useState<File[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -110,13 +112,13 @@ export default function FeedbackPage() {
                     onClick={() => router.back()}
                     className="mb-6 flex items-center text-sm text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200 transition-colors"
                 >
-                    <ArrowLeft size={16} className="mr-1" /> Back
+                    <ArrowLeft size={16} className="mr-1" /> {t('feedback.back')}
                 </button>
 
                 <div className="mb-6 text-center">
-                    <h1 className="text-2xl font-serif font-bold mb-2">We value your feedback</h1>
+                    <h1 className="text-2xl font-serif font-bold mb-2">{t('feedback.title')}</h1>
                     <p className="text-muted-foreground text-sm">
-                        Found a bug? Have a suggestion? Let us know how we can improve.
+                        {t('feedback.subtitle')}
                     </p>
                 </div>
 
@@ -125,28 +127,28 @@ export default function FeedbackPage() {
                         <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 text-green-600 rounded-full flex items-center justify-center mb-4">
                             <Send size={32} />
                         </div>
-                        <h3 className="text-xl font-medium text-green-600 mb-2">Thank you!</h3>
-                        <p className="text-neutral-500 text-sm">Your feedback has been submitted successfully.</p>
-                        <p className="text-neutral-400 text-xs mt-4">Redirecting...</p>
+                        <h3 className="text-xl font-medium text-green-600 mb-2">{t('feedback.success.title')}</h3>
+                        <p className="text-neutral-500 text-sm">{t('feedback.success.message')}</p>
+                        <p className="text-neutral-400 text-xs mt-4">{t('feedback.success.redirecting')}</p>
                     </div>
                 ) : (
                     <form onSubmit={handleSubmit} className="space-y-6">
                         <div>
                             <label className="block text-sm font-medium mb-2 text-neutral-700 dark:text-neutral-300">
-                                Your Message
+                                {t('feedback.form.messageLabel')}
                             </label>
                             <textarea
                                 required
                                 value={comment}
                                 onChange={(e) => setComment(e.target.value)}
-                                placeholder="Describe your issue or suggestion..."
+                                placeholder={t('feedback.form.messagePlaceholder')}
                                 className="w-full h-32 px-4 py-3 bg-neutral-50 dark:bg-neutral-800 border border-border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none resize-none transition-all placeholder:text-neutral-400 text-sm"
                             />
                         </div>
 
                         <div>
                             <label className="block text-sm font-medium mb-2 text-neutral-700 dark:text-neutral-300">
-                                Screenshots (Optional)
+                                {t('feedback.form.screenshotsLabel')}
                             </label>
 
                             {/* File List */}
@@ -180,7 +182,7 @@ export default function FeedbackPage() {
                                 />
                                 <div className="flex items-center justify-center gap-3 px-4 py-3 border-2 border-dashed border-border bg-neutral-50 dark:bg-neutral-800 text-neutral-500 group-hover:bg-neutral-100 dark:group-hover:bg-neutral-700 rounded-xl transition-all">
                                     <Upload size={20} />
-                                    <span className="text-sm">Click to add screenshots</span>
+                                    <span className="text-sm">{t('feedback.form.clickToAdd')}</span>
                                 </div>
                             </div>
                         </div>
@@ -192,11 +194,11 @@ export default function FeedbackPage() {
                         >
                             {isSubmitting ? (
                                 <>
-                                    <Loader2 size={18} className="animate-spin" /> Submitting...
+                                    <Loader2 size={18} className="animate-spin" /> {t('feedback.form.submitting')}
                                 </>
                             ) : (
                                 <>
-                                    Send Feedback <Send size={18} />
+                                    {t('feedback.form.submit')} <Send size={18} />
                                 </>
                             )}
                         </button>
