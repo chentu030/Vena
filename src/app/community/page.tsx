@@ -6,19 +6,20 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     ArrowBigUp, ArrowBigDown, MessageSquare, Share2, Bookmark,
     Plus, TrendingUp, Clock, Award, ChevronDown, Users, Search,
-    X, Link as LinkIcon, FileText, Image as ImageIcon, Loader2, Sparkles, Flame, Shield, Globe, UploadCloud, File, Trash2, Mic, Paperclip
+    X, Link as LinkIcon, FileText, Image as ImageIcon, Loader2, Sparkles, Flame, Shield, Globe, UploadCloud, File, Trash2, Mic, Paperclip, Video, Music
 } from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
 import { useAuth } from '@/lib/auth';
 import {
     Community, CommunityPost, subscribeToPosts, subscribeToCommunities,
-    createPost, votePost, createCommunity, getUserKarma, UserKarma
+    createPost, votePost, createCommunity, getUserKarma, UserKarma, PostAttachment
 } from '@/lib/firestore';
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { v4 as uuidv4 } from 'uuid';
 
 type SortType = 'hot' | 'new' | 'top';
-type PostType = 'text' | 'link' | 'paper' | 'image';
+type PostType = 'text' | 'link' | 'paper' | 'image' | 'video' | 'audio' | 'mixed';
 
 export default function CommunityPage() {
     const router = useRouter();
@@ -35,14 +36,16 @@ export default function CommunityPage() {
     // Create Post Form
     const [postTitle, setPostTitle] = useState('');
     const [postContent, setPostContent] = useState('');
-    const [postType, setPostType] = useState<PostType>('text');
     const [postLink, setPostLink] = useState('');
     const [postCommunity, setPostCommunity] = useState('');
-    const [selectedFile, setSelectedFile] = useState<File | null>(null);
-    const [filePreview, setFilePreview] = useState<string | null>(null); // For image preview
+
+    // Multi-file state
+    const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+    const [filePreviews, setFilePreviews] = useState<{ file: File, preview: string, type: 'image' | 'video' | 'audio' | 'file' }[]>([]);
+
     const [isSubmitting, setIsSubmitting] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const [activeAttachment, setActiveAttachment] = useState<'none' | 'image' | 'file' | 'link'>('none');
+    const [attachmentType, setAttachmentType] = useState<'none' | 'media' | 'file' | 'link'>('none'); // media = image/video/audio
 
     // Create Community Form
     const [communityName, setCommunityName] = useState('');
@@ -93,41 +96,47 @@ export default function CommunityPage() {
     };
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files[0]) {
-            const file = e.target.files[0];
-            setSelectedFile(file);
+        if (e.target.files && e.target.files.length > 0) {
+            const newFiles = Array.from(e.target.files);
+            setSelectedFiles(prev => [...prev, ...newFiles]);
 
-            if (file.type.startsWith('image/')) {
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    setFilePreview(reader.result as string);
+            const newPreviews = newFiles.map(file => {
+                let type: 'image' | 'video' | 'audio' | 'file' = 'file';
+                if (file.type.startsWith('image/')) type = 'image';
+                else if (file.type.startsWith('video/')) type = 'video';
+                else if (file.type.startsWith('audio/')) type = 'audio';
+
+                return {
+                    file,
+                    preview: URL.createObjectURL(file), // Provide object URL for preview
+                    type
                 };
-                reader.readAsDataURL(file);
-                setPostType('image');
-                setActiveAttachment('image');
-            } else if (file.type === 'application/pdf') {
-                setFilePreview(null);
-                setPostType('paper');
-                setActiveAttachment('file');
-            }
+            });
+            setFilePreviews(prev => [...prev, ...newPreviews]);
+            if (attachmentType === 'none') setAttachmentType('media'); // Default to media/file view
         }
     };
 
-    const triggerFileSelect = (type: 'image' | 'file') => {
+    const triggerFileSelect = (acceptType: string) => {
         if (fileInputRef.current) {
-            fileInputRef.current.accept = type === 'image' ? "image/*" : "application/pdf";
+            fileInputRef.current.accept = acceptType;
             fileInputRef.current.click();
         }
     };
 
-    const removeAttachment = () => {
-        setSelectedFile(null);
-        setFilePreview(null);
-        setPostLink('');
-        setActiveAttachment('none');
-        setPostType('text');
-        if (fileInputRef.current) fileInputRef.current.value = '';
+    const removeFile = (index: number) => {
+        setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+        setFilePreviews(prev => {
+            const newPreviews = [...prev];
+            URL.revokeObjectURL(newPreviews[index].preview); // Cleanup
+            return newPreviews.filter((_, i) => i !== index);
+        });
     };
+
+    const removeLink = () => {
+        setPostLink('');
+        if (selectedFiles.length === 0) setAttachmentType('none');
+    }
 
     const handleCreatePost = async () => {
         if (!user || !postTitle.trim() || !postCommunity) return;
@@ -135,25 +144,42 @@ export default function CommunityPage() {
         const community = communities.find(c => c.id === postCommunity);
 
         try {
-            let finalLinkUrl = postLink;
-            let finalImageUrl = undefined;
+            const attachments: PostAttachment[] = [];
 
-            if (selectedFile) {
-                const storagePath = `community/${postCommunity}/${Date.now()}_${selectedFile.name}`;
+            // Upload all files
+            for (const file of selectedFiles) {
+                const storagePath = `community/${postCommunity}/${Date.now()}_${uuidv4()}_${file.name}`;
                 const storageRef = ref(storage, storagePath);
-                await uploadBytes(storageRef, selectedFile);
+                await uploadBytes(storageRef, file);
                 const downloadUrl = await getDownloadURL(storageRef);
 
-                if (postType === 'image') {
-                    finalImageUrl = downloadUrl;
-                } else if (postType === 'paper') {
-                    finalLinkUrl = downloadUrl;
-                }
+                let type: 'image' | 'video' | 'audio' | 'file' = 'file';
+                if (file.type.startsWith('image/')) type = 'image';
+                else if (file.type.startsWith('video/')) type = 'video';
+                else if (file.type.startsWith('audio/')) type = 'audio';
+
+                attachments.push({
+                    id: uuidv4(),
+                    url: downloadUrl,
+                    type: type,
+                    name: file.name,
+                    size: file.size,
+                    mimeType: file.type
+                });
             }
 
-            // If link mode is active, ensure postType is 'link'
-            if (activeAttachment === 'link' && postLink) {
-                // postType is already set? ensure consistency
+            // Determine Post Type
+            let finalType: PostType = 'text';
+            if (postLink && attachments.length === 0) finalType = 'link';
+            else if (attachments.length > 0) {
+                // Simple logic for single type or mixed
+                const types = new Set(attachments.map(a => a.type));
+                if (types.has('video')) finalType = 'video';
+                else if (types.has('audio')) finalType = 'audio';
+                else if (types.has('image')) finalType = 'image';
+                else if (types.has('file')) finalType = 'paper'; // 'paper' or 'file'
+                // heavy logic not needed, just metadata
+                if (types.size > 1) finalType = 'mixed';
             }
 
             await createPost({
@@ -161,21 +187,24 @@ export default function CommunityPage() {
                 communityName: community?.displayName || community?.name || 'general',
                 title: postTitle,
                 content: postContent,
-                type: postType,
-                linkUrl: finalLinkUrl || undefined,
-                imageUrl: finalImageUrl,
+                type: finalType,
+                linkUrl: postLink || undefined,
+                // Legacy fields for backward compat single image/paper
+                imageUrl: attachments.find(a => a.type === 'image')?.url,
+                attachments: attachments, // New field!
                 authorId: user.uid,
                 authorName: user.displayName || 'Anonymous',
                 authorEmail: user.email || ''
             });
+
+            // Cleanup
             setShowCreatePost(false);
             setPostTitle('');
             setPostContent('');
             setPostLink('');
-            setPostType('text');
-            setSelectedFile(null);
-            setFilePreview(null);
-            setActiveAttachment('none');
+            setSelectedFiles([]);
+            setFilePreviews([]);
+            setAttachmentType('none');
         } catch (error) {
             console.error('Failed to create post:', error);
         } finally {
@@ -223,6 +252,84 @@ export default function CommunityPage() {
             </div>
         );
     }
+
+    // Helper to render attachments in feed
+    const renderAttachments = (post: CommunityPost) => {
+        const attachments = post.attachments || [];
+        // Backward compatibility
+        if (attachments.length === 0) {
+            if (post.imageUrl) return (
+                <div className="mb-4 rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-800 max-h-[400px]">
+                    <img src={post.imageUrl} alt="Post content" className="w-full h-full object-cover" />
+                </div>
+            );
+            // PDF handling for legacy
+            if (post.type === 'paper' && post.linkUrl && !post.linkUrl.startsWith('http')) {
+                // It's a file url
+                // Actually existing logic handles type='paper' with linkUrl
+            }
+            return null;
+        }
+
+        const images = attachments.filter(a => a.type === 'image');
+        const videos = attachments.filter(a => a.type === 'video');
+        const audios = attachments.filter(a => a.type === 'audio');
+        const files = attachments.filter(a => a.type === 'file');
+
+        return (
+            <div className="space-y-4 mb-4">
+                {/* Images Grid */}
+                {images.length > 0 && (
+                    <div className={`grid gap-2 ${images.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                        {images.map(img => (
+                            <img key={img.id} src={img.url} className="rounded-xl object-cover w-full max-h-[400px]" alt={img.name} />
+                        ))}
+                    </div>
+                )}
+                {/* Videos */}
+                {videos.map(vid => (
+                    <div key={vid.id} className="rounded-xl overflow-hidden bg-black">
+                        <video src={vid.url} controls className="w-full max-h-[500px]" />
+                    </div>
+                ))}
+                {/* Audios */}
+                {audios.map(aud => (
+                    <div key={aud.id} className="flex items-center gap-3 p-3 bg-neutral-100 dark:bg-neutral-800 rounded-xl">
+                        <div className="p-2 bg-pink-100 dark:bg-pink-900/30 text-pink-500 rounded-full">
+                            <Music size={20} />
+                        </div>
+                        <div className="flex-1">
+                            <div className="text-sm font-medium mb-1">{aud.name}</div>
+                            <audio src={aud.url} controls className="w-full h-8" />
+                        </div>
+                    </div>
+                ))}
+                {/* Files */}
+                {files.map(file => (
+                    <div key={file.id} className="flex items-center gap-3 p-3 bg-neutral-100 dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 group/file">
+                        <div className="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-600">
+                            <FileText size={20} />
+                        </div>
+                        <div className="flex-1 overflow-hidden">
+                            <div className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate group-hover/file:underline">
+                                {file.name}
+                            </div>
+                            <div className="text-xs text-neutral-500">{(file.size / 1024 / 1024).toFixed(2)} MB</div>
+                        </div>
+                        <a
+                            href={file.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-3 py-1.5 bg-white dark:bg-neutral-700 rounded-lg text-xs font-medium shadow-sm hover:opacity-80"
+                            onClick={e => e.stopPropagation()}
+                        >
+                            Download
+                        </a>
+                    </div>
+                ))}
+            </div>
+        );
+    };
 
     const currentCommunity = selectedCommunity ? communities.find(c => c.id === selectedCommunity) : null;
 
@@ -401,13 +508,11 @@ export default function CommunityPage() {
                                                         </p>
                                                     )}
 
-                                                    {post.imageUrl && (
-                                                        <div className="mb-4 rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-800 max-h-[400px]">
-                                                            <img src={post.imageUrl} alt="Post content" className="w-full h-full object-cover" />
-                                                        </div>
-                                                    )}
+                                                    {/* Render Attachments */}
+                                                    {renderAttachments(post)}
 
-                                                    {(post.linkUrl && post.type === 'link') && (
+                                                    {/* Legacy Link/File Handling if not in attachments */}
+                                                    {(!post.attachments || post.attachments.length === 0) && (post.linkUrl && post.type === 'link') && (
                                                         <div className="mb-4 p-3 rounded-xl bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/30 flex items-center gap-3 group/link">
                                                             <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-800/30 flex items-center justify-center text-blue-500">
                                                                 <LinkIcon size={20} />
@@ -422,8 +527,7 @@ export default function CommunityPage() {
                                                             </div>
                                                         </div>
                                                     )}
-
-                                                    {(post.linkUrl && post.type === 'paper') && (
+                                                    {(!post.attachments || post.attachments.length === 0) && (post.linkUrl && post.type === 'paper') && (
                                                         <div className="mb-4 p-3 rounded-xl bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 flex items-center gap-3 group/file">
                                                             <div className="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-600">
                                                                 <FileText size={20} />
@@ -432,15 +536,7 @@ export default function CommunityPage() {
                                                                 <div className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate group-hover/file:underline">
                                                                     PDF Document
                                                                 </div>
-                                                                <a
-                                                                    href={post.linkUrl}
-                                                                    target="_blank"
-                                                                    rel="noopener noreferrer"
-                                                                    className="text-xs text-blue-500 hover:underline"
-                                                                    onClick={e => e.stopPropagation()}
-                                                                >
-                                                                    Download / View
-                                                                </a>
+                                                                <a className="text-xs text-blue-500">Download / View</a>
                                                             </div>
                                                         </div>
                                                     )}
@@ -593,8 +689,8 @@ export default function CommunityPage() {
                                 />
 
                                 {/* Link Input */}
-                                {activeAttachment === 'link' && (
-                                    <div className="relative flex items-center bg-neutral-50 dark:bg-neutral-800 rounded-xl p-2 border border-blue-200 dark:border-blue-900/50 shadow-sm animate-in fade-in zoom-in-95 duration-200">
+                                {postLink && (
+                                    <div className="relative flex items-center bg-neutral-50 dark:bg-neutral-800 rounded-xl p-2 border border-blue-200 dark:border-blue-900/50 shadow-sm mb-2">
                                         <div className="p-2 bg-blue-100 dark:bg-blue-900/40 rounded-lg text-blue-500 mr-2">
                                             <LinkIcon size={20} />
                                         </div>
@@ -604,39 +700,56 @@ export default function CommunityPage() {
                                             onChange={e => setPostLink(e.target.value)}
                                             placeholder="https://"
                                             className="flex-1 bg-transparent border-none outline-none text-sm font-medium text-blue-600 dark:text-blue-400"
-                                            autoFocus
                                         />
-                                        <button onClick={removeAttachment} className="p-1.5 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded-full transition-colors text-neutral-400">
+                                        <button onClick={removeLink} className="p-1.5 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded-full transition-colors text-neutral-400">
                                             <X size={16} />
                                         </button>
                                     </div>
                                 )}
 
-                                {/* Image/File Preview Area */}
-                                {(activeAttachment === 'image' || activeAttachment === 'file') && selectedFile && (
-                                    <div className="relative rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 animate-in fade-in zoom-in-95 duration-200">
-                                        <button
-                                            onClick={removeAttachment}
-                                            className="absolute top-2 right-2 p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full backdrop-blur-sm transition-colors z-10"
-                                        >
-                                            <X size={16} />
-                                        </button>
+                                {/* Attachments Preview Grid */}
+                                {selectedFiles.length > 0 && (
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                        {filePreviews.map((preview, index) => (
+                                            <div key={index} className="relative group rounded-xl overflow-hidden bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 aspect-square">
+                                                <button
+                                                    onClick={() => removeFile(index)}
+                                                    className="absolute top-1 right-1 p-1 bg-black/50 hover:bg-black/70 text-white rounded-full transition-colors z-20 opacity-0 group-hover:opacity-100"
+                                                >
+                                                    <X size={14} />
+                                                </button>
 
-                                        {activeAttachment === 'image' && filePreview && (
-                                            <img src={filePreview} alt="Preview" className="w-full max-h-[300px] object-cover" />
-                                        )}
-
-                                        {activeAttachment === 'file' && (
-                                            <div className="flex items-center gap-4 p-4">
-                                                <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center text-emerald-600">
-                                                    <FileText size={24} />
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="font-medium truncate">{selectedFile.name}</p>
-                                                    <p className="text-xs text-neutral-400">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB PDF</p>
-                                                </div>
+                                                {preview.type === 'image' && (
+                                                    <img src={preview.preview} alt="preview" className="w-full h-full object-cover" />
+                                                )}
+                                                {preview.type === 'video' && (
+                                                    <div className="w-full h-full flex items-center justify-center bg-black text-white">
+                                                        <Video size={32} />
+                                                    </div>
+                                                )}
+                                                {preview.type === 'audio' && (
+                                                    <div className="w-full h-full flex flex-col items-center justify-center text-pink-500">
+                                                        <Music size={32} />
+                                                        <span className="text-xs px-2 truncate mt-2 max-w-full">{preview.file.name}</span>
+                                                    </div>
+                                                )}
+                                                {preview.type === 'file' && (
+                                                    <div className="w-full h-full flex flex-col items-center justify-center text-emerald-600">
+                                                        <FileText size={32} />
+                                                        <span className="text-xs px-2 truncate mt-2 max-w-full text-center">{preview.file.name}</span>
+                                                    </div>
+                                                )}
                                             </div>
-                                        )}
+                                        ))}
+
+                                        {/* Add more button */}
+                                        <button
+                                            onClick={() => triggerFileSelect("image/*,video/*,audio/*,application/pdf")}
+                                            className="flex flex-col items-center justify-center bg-neutral-50 dark:bg-neutral-800/50 hover:bg-neutral-100 dark:hover:bg-neutral-800 border-2 border-dashed border-neutral-200 dark:border-neutral-700 rounded-xl transition-colors text-neutral-400 hover:text-neutral-500"
+                                        >
+                                            <Plus size={24} />
+                                            <span className="text-xs font-medium mt-1">Add</span>
+                                        </button>
                                     </div>
                                 )}
                             </div>
@@ -646,6 +759,7 @@ export default function CommunityPage() {
                                 type="file"
                                 ref={fileInputRef}
                                 className="hidden"
+                                multiple
                                 onChange={handleFileSelect}
                             />
 
@@ -655,29 +769,35 @@ export default function CommunityPage() {
                                     <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100 pl-1">Add to your post</span>
                                     <div className="flex gap-1">
                                         <button
-                                            onClick={() => triggerFileSelect('image')}
-                                            className={`p-2 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors ${activeAttachment === 'image' ? 'bg-green-100 dark:bg-green-900/20 text-green-600' : 'text-green-500'}`}
+                                            onClick={() => triggerFileSelect('image/*,video/*')}
+                                            className="p-2 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-green-500 hover:text-green-600"
                                             title="Photo/Video"
                                         >
                                             <ImageIcon size={24} />
                                         </button>
                                         <button
-                                            onClick={() => triggerFileSelect('file')}
-                                            className={`p-2 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors ${activeAttachment === 'file' ? 'bg-red-100 dark:bg-red-900/20 text-red-600' : 'text-red-500'}`}
-                                            title="PDF Document"
+                                            onClick={() => triggerFileSelect('audio/*')}
+                                            className="p-2 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-pink-500 hover:text-pink-600"
+                                            title="Audio"
+                                        >
+                                            <Mic size={24} />
+                                        </button>
+                                        <button
+                                            onClick={() => triggerFileSelect('application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document')}
+                                            className="p-2 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-red-500 hover:text-red-600"
+                                            title="File/Document"
                                         >
                                             <FileText size={24} />
                                         </button>
-                                        <button
-                                            onClick={() => {
-                                                setActiveAttachment('link');
-                                                setPostType('link');
-                                            }}
-                                            className={`p-2 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors ${activeAttachment === 'link' ? 'bg-blue-100 dark:bg-blue-900/20 text-blue-600' : 'text-blue-500'}`}
-                                            title="Link"
-                                        >
-                                            <LinkIcon size={24} />
-                                        </button>
+                                        {!postLink && (
+                                            <button
+                                                onClick={() => setPostLink('http://')}
+                                                className="p-2 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors text-blue-500 hover:text-blue-600"
+                                                title="Link"
+                                            >
+                                                <LinkIcon size={24} />
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
 

@@ -1040,6 +1040,16 @@ export interface CommunityPost {
     commentCount: number;
     createdAt: any;
     updatedAt: any;
+    attachments?: PostAttachment[];
+}
+
+export interface PostAttachment {
+    id: string; // uuid or random string
+    url: string;
+    type: 'image' | 'video' | 'audio' | 'file';
+    name: string;
+    size: number;
+    mimeType: string;
 }
 
 export interface PostComment {
