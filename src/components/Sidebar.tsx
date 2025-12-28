@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { LayoutDashboard, Compass, Settings, LogOut, ChevronLeft, ChevronRight, Users, MessageSquare, Sun, Moon } from 'lucide-react';
+import { LayoutDashboard, Compass, Settings, LogOut, ChevronLeft, ChevronRight, Users, MessageSquare, Sun, Moon, Home } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import { useAuth } from '@/lib/auth';
@@ -11,9 +11,10 @@ export default function Sidebar() {
     const pathname = usePathname();
     const { signOut } = useAuth();
     const { theme, setTheme } = useTheme();
-    const [isCollapsed, setIsCollapsed] = useState(false);
+    const [isCollapsed, setIsCollapsed] = useState(true);
 
     const menuItems = [
+        { name: 'Home', icon: Home, path: '/' },
         { name: 'My Projects', icon: LayoutDashboard, path: '/dashboard' },
         { name: 'Teams', icon: Users, path: '/teams' },
         { name: 'Explore', icon: Compass, path: '/explore' },

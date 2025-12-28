@@ -8,6 +8,8 @@ import { Loader2, Plus, Folder, Trash2, LogOut, Moon, Sun, Search, X, Edit2, Tag
 import { useTheme } from 'next-themes';
 import { ICON_OPTIONS, COLOR_OPTIONS, getIconComponent, getColorClasses } from '@/lib/project-utils';
 import Sidebar from '@/components/Sidebar';
+import VenaliumLoading from '@/components/VenaliumLoading';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export default function Dashboard() {
     const { user, loading, signOut } = useAuth();
@@ -36,6 +38,11 @@ export default function Dashboard() {
     const [isPublic, setIsPublic] = useState(false);
     const [allowPublicEditing, setAllowPublicEditing] = useState(false);
     const [tagInput, setTagInput] = useState('');
+
+    // Smart Create State
+    const [researchTopic, setResearchTopic] = useState('');
+    const [isCreatingSmart, setIsCreatingSmart] = useState(false);
+    const [smartCreateStatus, setSmartCreateStatus] = useState('');
 
     useEffect(() => {
         if (!loading && !user) {
@@ -142,6 +149,124 @@ export default function Dashboard() {
         }
     };
 
+    const handleSmartCreate = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!researchTopic.trim() || !user) return;
+
+        setIsCreatingSmart(true);
+        setSmartCreateStatus('Analyzing your research topic...');
+        try {
+            // Use gemini-2.5-flash for combined naming + config extraction
+            const res = await fetch('/api/gemini', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: 'gemini-2.5-flash',
+                    task: 'summary',
+                    prompt: `Analyze this research request and extract configuration.
+User Input: "${researchTopic}"
+
+Return a JSON object with these fields:
+{
+    "projectName": "A short, professional project name (max 8 English words)",
+    "keywords": "Academic search keywords extracted from the request",
+    "languages": ["en"], // Array of language codes. Detect from request.
+    "startYear": 2020, // If user mentions years, extract. Default: 2020
+    "endYear": 2025, // Default: 2025
+    "scopusCount": 15, // Default: 15
+    "geminiCount": 15, // Default: 15
+    "additionalInstructions": "" // Any extra requirements from user, e.g. "only empirical studies", "exclude review papers"
+}
+
+Language code mapping:
+- English: "en"
+- Traditional Chinese: "zh-TW"
+- Simplified Chinese: "zh-CN"
+- French: "fr"
+- German: "de"
+- Japanese: "ja"
+- Korean: "ko"
+- Spanish: "es"
+- Portuguese: "pt"
+- Russian: "ru"
+
+Rules:
+1. If user mentions "法文" or "French", include "fr" in languages.
+2. If user mentions years like "2020-2023", set startYear=2020, endYear=2023.
+3. If user input contains Chinese, also include "zh-TW" in languages.
+4. projectName should be in English, concise and professional.
+5. Extract extra requirements like "只要實證研究" or "exclude meta-analysis" into additionalInstructions.
+6. Return ONLY valid JSON, no markdown or explanation.`,
+                })
+            });
+
+            const data = await res.json();
+
+            // Parse the response
+            let config = {
+                projectName: researchTopic.substring(0, 50),
+                keywords: researchTopic,
+                languages: ['en'],
+                startYear: 2020,
+                endYear: 2025,
+                scopusCount: 15,
+                geminiCount: 15
+            };
+
+            if (data.text) {
+                try {
+                    const jsonStr = data.text.replace(/```json/g, '').replace(/```/g, '').trim();
+                    const parsed = JSON.parse(jsonStr);
+                    config = { ...config, ...parsed };
+                } catch (e) {
+                    console.error("Failed to parse config JSON", e);
+                }
+            }
+
+            setSmartCreateStatus('Creating your workspace...');
+
+            // Create project with the AI-generated name
+            const newProjectId = await createProject(
+                user.uid,
+                config.projectName,
+                `Research project about: ${researchTopic}`,
+                'Compass',
+                'blue',
+                ['research', 'smart-create'],
+                false,
+                user.displayName || 'Anonymous',
+                user.email || '',
+                false
+            );
+
+            setSmartCreateStatus('Preparing research environment...');
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Build the search config URL params
+            const searchConfig = {
+                keywords: config.keywords,
+                languages: config.languages,
+                startYear: config.startYear,
+                endYear: config.endYear,
+                scopusCount: config.scopusCount,
+                geminiCount: config.geminiCount,
+                additionalInstructions: config.additionalInstructions || '',
+                originalMessage: researchTopic
+            };
+
+            // Redirect with full config
+            if (newProjectId) {
+                router.push(`/project/${newProjectId}?initialSearchConfig=${encodeURIComponent(JSON.stringify(searchConfig))}`);
+            }
+
+        } catch (error) {
+            console.error("Smart create failed:", error);
+            alert("Failed to create project automatically. Please try again.");
+            setIsCreatingSmart(false);
+            setSmartCreateStatus('');
+        }
+    };
+
     const handleDeleteProject = async (projectId: string, e: React.MouseEvent) => {
         e.stopPropagation();
         if (!user || !confirm('Are you sure you want to delete this project? Data cannot be recovered.')) return;
@@ -202,6 +327,36 @@ export default function Dashboard() {
         <div className="min-h-screen bg-background text-foreground transition-colors duration-500 flex">
             <Sidebar />
 
+            {/* Full-screen Loading Overlay for Smart Create */}
+            <AnimatePresence>
+                {isCreatingSmart && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-white/95 dark:bg-black/95 backdrop-blur-xl"
+                    >
+                        <VenaliumLoading size="large" />
+                        <motion.p
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.2 }}
+                            className="mt-8 text-lg font-medium text-neutral-600 dark:text-neutral-300"
+                        >
+                            {smartCreateStatus}
+                        </motion.p>
+                        <motion.p
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ delay: 0.4 }}
+                            className="mt-2 text-sm text-muted-foreground"
+                        >
+                            AI is setting up your research workspace...
+                        </motion.p>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             <div className="flex-1 min-w-0">
                 {/* Header - Remove Logo, keep search & user actions */}
                 <header className="h-20 px-8 flex justify-between items-center bg-white/70 dark:bg-black/70 backdrop-blur-xl border-b border-border sticky top-0 z-30">
@@ -256,6 +411,52 @@ export default function Dashboard() {
                             <Plus size={18} />
                             New Project
                         </button>
+                    </div>
+
+                    {/* Smart Create Input Section (New) */}
+                    <div className="mb-12 relative overflow-hidden rounded-3xl bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/10 dark:to-indigo-900/10 border border-blue-100 dark:border-blue-900/30 p-8 md:p-12 text-center animate-fade-in shadow-sm">
+                        <div className="relative z-10 max-w-2xl mx-auto">
+                            <h2 className="text-2xl md:text-4xl font-serif font-medium mb-4 text-blue-900 dark:text-blue-100">
+                                What do you want to research?
+                            </h2>
+                            <p className="text-neutral-600 dark:text-neutral-400 mb-8 max-w-lg mx-auto">
+                                Enter a topic and let AI set up your workspace, find relevant papers, and organize your study.
+                            </p>
+
+                            <form onSubmit={handleSmartCreate} className="relative max-w-xl mx-auto">
+                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500" size={20} />
+                                <input
+                                    type="text"
+                                    value={researchTopic}
+                                    onChange={(e) => setResearchTopic(e.target.value)}
+                                    placeholder="e.g. Biodiversity credit, High-entropy alloys..."
+                                    className="w-full pl-12 pr-4 py-4 rounded-full border-2 border-blue-100 dark:border-blue-800 bg-white/80 dark:bg-black/50 backdrop-blur-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all text-lg shadow-sm"
+                                    disabled={isCreatingSmart}
+                                />
+                                {researchTopic.trim() && (
+                                    <button
+                                        type="submit"
+                                        disabled={isCreatingSmart}
+                                        className="absolute right-2 top-2 bottom-2 bg-blue-600 hover:bg-blue-700 text-white px-6 rounded-full font-medium transition-all flex items-center gap-2 shadow-md disabled:opacity-70 disabled:cursor-not-allowed"
+                                    >
+                                        {isCreatingSmart ? (
+                                            <>
+                                                <Loader2 size={18} className="animate-spin" />
+                                                Setting up...
+                                            </>
+                                        ) : (
+                                            <>
+                                                Start <Compass size={16} />
+                                            </>
+                                        )}
+                                    </button>
+                                )}
+                            </form>
+                        </div>
+
+                        {/* Decorative Background Elements */}
+                        <div className="absolute top-0 left-0 w-64 h-64 bg-blue-200/30 dark:bg-blue-500/10 rounded-full blur-3xl -translate-x-1/2 -translate-y-1/2"></div>
+                        <div className="absolute bottom-0 right-0 w-64 h-64 bg-indigo-200/30 dark:bg-indigo-500/10 rounded-full blur-3xl translate-x-1/2 translate-y-1/2"></div>
                     </div>
 
                     {isLoadingProjects ? (

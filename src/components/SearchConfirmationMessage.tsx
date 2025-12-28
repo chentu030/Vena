@@ -44,12 +44,12 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
     const [keywords, setKeywords] = useState(config.keywords);
     const [scopusCount, setScopusCount] = useState(config.scopusCount);
     const [geminiCount, setGeminiCount] = useState(config.geminiCount);
-    const [startYear, setStartYear] = useState(2023);
-    const [endYear, setEndYear] = useState(2026);
+    const [startYear, setStartYear] = useState(config.dateRange?.start || 2023);
+    const [endYear, setEndYear] = useState(config.dateRange?.end || 2026);
     const [isConfirmed, setIsConfirmed] = useState(false);
 
-    // 語言選擇狀態 - 預設選擇英文
-    const [selectedLanguages, setSelectedLanguages] = useState<string[]>(['en']);
+    // 語言選擇狀態 - 預設選擇英文 或 Config 中的語言
+    const [selectedLanguages, setSelectedLanguages] = useState<string[]>(config.languages || ['en']);
     const [showLanguageDropdown, setShowLanguageDropdown] = useState(false);
 
     // 群組選擇狀態 - 改為多選
@@ -57,6 +57,10 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
     const [showGroupDropdown, setShowGroupDropdown] = useState(false);
     const [isCreatingNewGroup, setIsCreatingNewGroup] = useState(false);
     const [newGroupName, setNewGroupName] = useState('');
+
+    // 額外指示給 Gemini
+    const [additionalInstructions, setAdditionalInstructions] = useState((config as any).additionalInstructions || '');
+    const [showAdvanced, setShowAdvanced] = useState(!!((config as any).additionalInstructions));
 
     // 切換語言選擇
     const toggleLanguage = (langId: string) => {
@@ -105,7 +109,8 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
             dateRange: { start: startYear, end: endYear },
             languages: selectedLanguages,
             targetGroupIds: isCreatingNewGroup ? undefined : (selectedGroupIds.length > 0 ? selectedGroupIds : undefined),
-            newGroupName: isCreatingNewGroup ? newGroupName : undefined
+            newGroupName: isCreatingNewGroup ? newGroupName : undefined,
+            additionalInstructions: additionalInstructions.trim() || undefined
         } as any);
     };
 
@@ -329,6 +334,28 @@ const SearchConfirmationMessage: React.FC<SearchConfirmationMessageProps> = ({ c
                         )}
                     </div>
                 )}
+
+                {/* Additional Instructions (Advanced) */}
+                <div className="space-y-1.5">
+                    <button
+                        type="button"
+                        onClick={() => setShowAdvanced(!showAdvanced)}
+                        className="text-xs font-medium text-muted-foreground ml-1 flex items-center gap-1 hover:text-foreground transition-colors"
+                    >
+                        <ChevronDown size={12} className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
+                        Additional Instructions for Gemini (Optional)
+                    </button>
+
+                    {showAdvanced && (
+                        <textarea
+                            value={additionalInstructions}
+                            onChange={(e) => setAdditionalInstructions(e.target.value)}
+                            placeholder="e.g., Focus on empirical studies, exclude review papers, prioritize recent publications from top journals..."
+                            className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-800 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all min-h-[60px] resize-none"
+                            rows={2}
+                        />
+                    )}
+                </div>
 
                 {/* Original Request Preview */}
                 <div className="bg-neutral-50 dark:bg-neutral-800 rounded-lg p-3 text-xs text-muted-foreground border border-border/50">

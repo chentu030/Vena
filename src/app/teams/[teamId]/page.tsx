@@ -496,6 +496,9 @@ export default function TeamDetailPage() {
 
         // 動態導入 Firebase Storage 上傳函數
         const { uploadPdfToFirebase } = await import('@/lib/pdf-upload');
+        const { generatePdfThumbnail, isPdfFile } = await import('@/lib/pdf-thumbnail');
+        const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+        const { getPdfStorage } = await import('@/lib/firebase-storage');
 
         // Add to queue
         const newQueueItems = filesToUpload.map(f => ({
@@ -524,13 +527,36 @@ export default function TeamDetailPage() {
                             // 更新上傳進度
                             setUploadQueue(prev => prev.map(item =>
                                 item.id === queueItem.id
-                                    ? { ...item, progress: Math.round(progress.progress * 0.8) + 10 } // 10-90%
+                                    ? { ...item, progress: Math.round(progress.progress * 0.7) + 10 } // 10-80%
                                     : item
                             ));
                         }
                     );
 
                     if (result.success && result.downloadUrl) {
+                        setUploadQueue(prev => prev.map(item => item.id === queueItem.id ? { ...item, progress: 80 } : item));
+
+                        // Generate thumbnail for PDFs
+                        let thumbnailUrl: string | undefined;
+                        if (isPdfFile(file)) {
+                            try {
+                                setUploadQueue(prev => prev.map(item => item.id === queueItem.id ? { ...item, progress: 85 } : item));
+
+                                const thumbnailResult = await generatePdfThumbnail(file, 300);
+                                if (thumbnailResult.success && thumbnailResult.blob) {
+                                    // Upload thumbnail to storage
+                                    const storage = getPdfStorage();
+                                    const thumbPath = `projects/${teamId}/thumbnails/${Date.now()}_${file.name.replace('.pdf', '.png')}`;
+                                    const thumbRef = ref(storage, thumbPath);
+                                    await uploadBytes(thumbRef, thumbnailResult.blob, { contentType: 'image/png' });
+                                    thumbnailUrl = await getDownloadURL(thumbRef);
+                                    console.log('Thumbnail generated:', thumbnailUrl);
+                                }
+                            } catch (thumbError) {
+                                console.error('Thumbnail generation failed (non-critical):', thumbError);
+                            }
+                        }
+
                         setUploadQueue(prev => prev.map(item => item.id === queueItem.id ? { ...item, progress: 90 } : item));
 
                         // Save to Firestore
@@ -542,6 +568,7 @@ export default function TeamDetailPage() {
                                 size: file.size,
                                 parentId: currentFolderId,
                                 storagePath: result.storagePath,
+                                thumbnailUrl: thumbnailUrl,
                                 uploadedBy: user.email!,
                                 uploadedAt: new Date(),
                                 color: 'blue',
@@ -2001,7 +2028,7 @@ export default function TeamDetailPage() {
                                                                 {file.type.startsWith('image/') ? (
                                                                     <img src={file.url} alt={file.name} className="w-full h-full object-cover" />
                                                                 ) : (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) ? (
-                                                                    <PdfThumbnail url={file.url || ''} />
+                                                                    <PdfThumbnail url={file.url || ''} thumbnailUrl={file.thumbnailUrl} />
                                                                 ) : (
                                                                     <FileText size={40} />
                                                                 )}

@@ -4,11 +4,17 @@ import React, { ReactNode } from "react";
 
 interface DotPatternBackgroundProps extends React.HTMLProps<HTMLDivElement> {
     children: ReactNode;
+    bodyClassName?: string;
+    showMarquee?: boolean; // Whether to show scrolling text background
+    animateDots?: boolean; // Whether dots should pulse/animate
 }
 
 export const DotPatternBackground = ({
     className,
     children,
+    bodyClassName,
+    showMarquee = true,
+    animateDots = true,
     ...props
 }: DotPatternBackgroundProps) => {
     return (
@@ -47,7 +53,7 @@ export const DotPatternBackground = ({
                                 cx="4"
                                 cy="4"
                                 r="2"
-                                className="fill-neutral-400 dark:fill-neutral-500 animate-pulse-dots"
+                                className={`fill-neutral-400 dark:fill-neutral-500 ${animateDots ? 'animate-pulse-dots' : 'opacity-30'}`}
                             />
                         </pattern>
                         {/* Radial gradient mask for refined center focus */}
@@ -70,23 +76,29 @@ export const DotPatternBackground = ({
             </div>
 
             {/* Marquee Text Layer - z-[2] */}
-            <div className="absolute inset-0 overflow-hidden pointer-events-none select-none z-[2] flex flex-col justify-between py-[12vh]">
-                {/* Top Line - Moving Left */}
-                <div className="whitespace-nowrap animate-marquee-left opacity-[0.05]">
-                    <span className="text-[10rem] font-bold font-serif text-neutral-900 dark:text-white tracking-tight">
-                        KNOWLEDGE · NEXUS · DATA · INTELLIGENCE · KNOWLEDGE · NEXUS · DATA · INTELLIGENCE · KNOWLEDGE · NEXUS · DATA · INTELLIGENCE ·
-                    </span>
+            {showMarquee && (
+                <div className="absolute inset-0 overflow-hidden pointer-events-none select-none z-[2] flex flex-col justify-between py-[12vh]">
+                    {/* Top Line - Moving Left */}
+                    <div className="flex animate-marquee-left opacity-[0.05]">
+                        {Array(4).fill("KNOWLEDGE · NEXUS · DATA · INTELLIGENCE · ").map((text, i) => (
+                            <span key={i} className="text-[10rem] font-bold font-serif text-neutral-900 dark:text-white tracking-tight flex-shrink-0 mx-4">
+                                {text}
+                            </span>
+                        ))}
+                    </div>
+                    {/* Bottom Line - Moving Right */}
+                    <div className="flex animate-marquee-right opacity-[0.05]">
+                        {Array(4).fill("RESEARCH · ANALYSIS · DISCOVERY · VENALIUM · ").map((text, i) => (
+                            <span key={i} className="text-[10rem] font-bold font-serif text-neutral-900 dark:text-white tracking-tight flex-shrink-0 mx-4">
+                                {text}
+                            </span>
+                        ))}
+                    </div>
                 </div>
-                {/* Bottom Line - Moving Right */}
-                <div className="whitespace-nowrap animate-marquee-right opacity-[0.05]">
-                    <span className="text-[10rem] font-bold font-serif text-neutral-900 dark:text-white tracking-tight">
-                        RESEARCH · ANALYSIS · DISCOVERY · VENALIUM · RESEARCH · ANALYSIS · DISCOVERY · VENALIUM · RESEARCH · ANALYSIS · DISCOVERY · VENALIUM ·
-                    </span>
-                </div>
-            </div>
+            )}
 
             {/* Content Layer - z-10 */}
-            <div className="relative z-10">
+            <div className={cn("relative z-10", bodyClassName)}>
                 {children}
             </div>
 
@@ -94,10 +106,10 @@ export const DotPatternBackground = ({
             <style jsx global>{`
                 @keyframes marquee-left {
                     0% { transform: translateX(0); }
-                    100% { transform: translateX(-33.33%); }
+                    100% { transform: translateX(-50%); }
                 }
                 @keyframes marquee-right {
-                    0% { transform: translateX(-33.33%); }
+                    0% { transform: translateX(-50%); }
                     100% { transform: translateX(0); }
                 }
                 @keyframes pulse-dots {
@@ -105,10 +117,14 @@ export const DotPatternBackground = ({
                     50% { opacity: 0.3; transform: scale(0.7); }
                 }
                 .animate-marquee-left {
-                    animation: marquee-left 45s linear infinite;
+                    display: flex;
+                    width: max-content;
+                    animation: marquee-left 120s linear infinite;
                 }
                 .animate-marquee-right {
-                    animation: marquee-right 55s linear infinite;
+                    display: flex;
+                    width: max-content;
+                    animation: marquee-right 120s linear infinite;
                 }
                 .animate-pulse-dots {
                     animation: pulse-dots 4s ease-in-out infinite;

@@ -17,39 +17,25 @@ export default function VenaliumLoading({ size = 'medium', className = '' }: Ven
     const dur = 2.5; // Faster cycle as requested
 
     // Exact Coordinates
-    const L = { x: 32, y: 40 };
-    const B = { x: 50, y: 72 };
-    const R = { x: 70, y: 40 };
-    const MID = { x: 41, y: 56 };
+    const L = { x: 25, y: 35 }; // Moved further out and up
+    const B = { x: 50, y: 78 }; // Moved further down (approx equilateral height)
+    const R = { x: 75, y: 35 }; // Moved further out and up
+    const MID = { x: 50, y: 56 }; // Centered midpoint
+
+    const BRIDGE_POS = { x: 37.5, y: 56.5 }; // Midpoint between L and B
 
     return (
         <div className={`flex items-center justify-center ${className}`} style={{ width: baseSize, height: baseSize }}>
             <svg viewBox="0 0 100 100" className="w-full h-full overflow-visible">
                 <defs>
                     <filter id={filterId}>
-                        <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur" />
+                        <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur" /> {/* Increased blur for stronger merge */}
                         <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 25 -10" result="goo" />
                         <feComposite in="SourceGraphic" in2="goo" operator="atop" />
                     </filter>
                 </defs>
 
-                {/* 
-                  STRATEGY: Baton Pass Loop
-                  Start (t=0): Balls at L, B, R.
-                  End (t=1): Balls at L, B, R.
-                  
-                  ACTORS:
-                  1. EXPLODERS: Start at L & B. Vanish immediately. Never reappear.
-                  2. MOVERS (The Splitters): Start at R. Move to MID. Split to L & B. Stay there.
-                  3. SPAWNER: Starts at R (hidden). Fades in. Stays there.
-                  
-                  At loop reset (t=1 -> t=0):
-                  - Visual L/B provided by MOVERS (t=1) passes to EXPLODERS (t=0).
-                  - Visual R provided by SPAWNER (t=1) passes to MOVERS (t=0).
-                */}
-
-                {/* GROUP 1: EXPLODERS (L & B) */}
-                {/* They start visible and explode/vanish. They stay invisible until loop resets. */}
+                {/* GROUP 1: EXPLODERS (L, B & BRIDGE) */}
                 <motion.circle
                     cx={L.x} cy={L.y} r={r} fill="currentColor" className="text-black dark:text-white"
                     animate={{
@@ -69,8 +55,17 @@ export default function VenaliumLoading({ size = 'medium', className = '' }: Ven
                     }}
                     transition={{ duration: dur, repeat: Infinity, times: [0, 0.15, 1], ease: "easeOut" }}
                 />
+                {/* Visual Bridge Element for Exploders phase - Capsule like using large radius overlapping */}
+                <motion.circle
+                    cx={BRIDGE_POS.x} cy={BRIDGE_POS.y} r={r * 0.6} fill="currentColor" className="text-black dark:text-white"
+                    animate={{
+                        opacity: [1, 0, 0],
+                        scale: [1, 0, 0],
+                    }}
+                    transition={{ duration: dur, repeat: Infinity, times: [0, 0.15, 1], ease: "easeOut" }}
+                />
 
-                {/* GROUP 2: MOVERS (Splitters) - Gooey Effect Applied */}
+                {/* GROUP 2: MOVERS (Splitters) */}
                 <g filter={`url(#${filterId})`}>
                     {/* Splitter L: R -> MID -> L */}
                     <motion.circle
@@ -82,7 +77,7 @@ export default function VenaliumLoading({ size = 'medium', className = '' }: Ven
                         transition={{
                             duration: dur,
                             repeat: Infinity,
-                            times: [0, 0.25, 0.4, 0.7, 1], // 0.4->0.7 is the STRETCH phase
+                            times: [0, 0.25, 0.4, 0.7, 1],
                             ease: "easeInOut"
                         }}
                     />
@@ -93,6 +88,21 @@ export default function VenaliumLoading({ size = 'medium', className = '' }: Ven
                         animate={{
                             cx: [R.x, MID.x, MID.x, B.x, B.x],
                             cy: [R.y, MID.y, MID.y, B.y, B.y],
+                        }}
+                        transition={{
+                            duration: dur,
+                            repeat: Infinity,
+                            times: [0, 0.25, 0.4, 0.7, 1],
+                            ease: "easeInOut"
+                        }}
+                    />
+
+                    {/* Splitter Bridge: R -> MID -> BRIDGE_POS */}
+                    <motion.circle
+                        cx={R.x} cy={R.y} r={Math.max(0, r * 0.6)} fill="currentColor" className="text-black dark:text-white"
+                        animate={{
+                            cx: [R.x, MID.x, MID.x, BRIDGE_POS.x, BRIDGE_POS.x],
+                            cy: [R.y, MID.y, MID.y, BRIDGE_POS.y, BRIDGE_POS.y],
                         }}
                         transition={{
                             duration: dur,

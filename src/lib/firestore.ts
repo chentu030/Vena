@@ -770,6 +770,7 @@ export interface TeamFile {
     icon?: string;
     driveId?: string;
     storagePath?: string; // Firebase Storage path
+    thumbnailUrl?: string; // PDF first page thumbnail
 }
 // File Management
 // File Management

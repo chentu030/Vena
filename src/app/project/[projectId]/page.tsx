@@ -159,6 +159,18 @@ export default function ProjectWorkspace() {
                 }
                 if (currentChat && currentChat.messages) {
                     setMessages(currentChat.messages);
+                } else {
+                    // Smart Create Logic: Check for pre-parsed config or topic
+                    const initialConfigStr = searchParams.get('initialSearchConfig');
+                    const initialTopic = searchParams.get('initialSearchTopic');
+
+                    if (initialConfigStr) {
+                        // New flow: Config already parsed by Dashboard/Home
+                        handleParsedSearchConfig(initialConfigStr);
+                    } else if (initialTopic) {
+                        // Legacy flow: Just topic, needs analysis
+                        handleInitialTopicAnalysis(initialTopic);
+                    }
                 }
 
                 // Restore last active Manuscript
@@ -184,6 +196,135 @@ export default function ProjectWorkspace() {
             loadAll();
         }
     }, [user, projectId]);
+
+    // New: Handle pre-parsed search config from URL
+    const handleParsedSearchConfig = (configStr: string) => {
+        try {
+            const config = JSON.parse(configStr);
+
+            // Add a welcoming system message
+            const welcomeMsg: Message = {
+                role: 'system',
+                content: `👋 Welcome! Your search parameters have been configured based on your request.`
+            };
+            setMessages([welcomeMsg]);
+
+            // Build the full config for the confirmation dialog
+            const fullConfig = {
+                keywords: config.keywords || '',
+                languages: config.languages || ['en'],
+                scopusCount: config.scopusCount || 15,
+                geminiCount: config.geminiCount || 15,
+                dateRange: {
+                    start: config.startYear || 2020,
+                    end: config.endYear || 2025
+                },
+                additionalInstructions: config.additionalInstructions || '',
+                originalMessage: config.originalMessage || config.keywords
+            };
+
+            // Add the confirmation message with pre-filled config
+            setMessages(prev => [...prev, {
+                role: 'model',
+                type: 'search-confirmation',
+                content: JSON.stringify(fullConfig)
+            }]);
+
+        } catch (e) {
+            console.error("Failed to parse initialSearchConfig", e);
+        }
+    };
+
+    const handleInitialTopicAnalysis = async (topic: string) => {
+        // Prevent double execution if messages already exist (handled in logic above)
+        setLoadingStatus("Analyzing research topic...");
+
+        // Add a welcoming system message
+        const welcomeMsg: Message = {
+            role: 'system',
+            content: `👋 Welcome! I'm analyzing your topic: "${topic}" to set up your search parameters.`
+        };
+        setMessages([welcomeMsg]);
+
+        try {
+            const res = await fetch('/api/gemini', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: 'gemini-2.5-flash',
+                    task: 'summary',
+                    prompt: `Analyze the research topic: "${topic}" and extract search configuration.
+                    
+                    Return JSON ONLY with this structure:
+                    {
+                        "keywords": "main academic search string (with OR/AND if needed)",
+                        "languages": ["en", "zh-TW"], // Detect derived languages
+                        "scopusCount": 15,
+                        "geminiCount": 15,
+                        "startYear": 2020,
+                        "endYear": 2025
+                    }
+                    
+                    Rules:
+                    - Defaults: languages=['en'], counts=15.
+                    - If topic contains Chinese characters, include 'zh-TW' and 'zh-CN' in languages.
+                    - If topic mentions "法文" or "French", include 'fr'.
+                    - If topic mentions years like "2020-2023", set startYear=2020, endYear=2023.
+                    `
+                })
+            });
+
+            const data = await res.json();
+            let config = {
+                keywords: topic,
+                languages: ['en'],
+                scopusCount: 15,
+                geminiCount: 15,
+                dateRange: { start: 2020, end: 2025 },
+                originalMessage: topic
+            };
+
+            if (data.text) {
+                const jsonStr = data.text.replace(/^["']|["']$/g, '').replace(/```json/g, '').replace(/```/g, '').trim();
+                try {
+                    const parsed = JSON.parse(jsonStr);
+                    config = {
+                        ...config,
+                        ...parsed,
+                        dateRange: { start: parsed.startYear || 2020, end: parsed.endYear || 2025 },
+                        originalMessage: topic
+                    };
+                } catch (e) {
+                    console.error("Failed to parse config JSON", e);
+                }
+            }
+
+            // Add the confirmation message
+            setMessages(prev => [...prev, {
+                role: 'model',
+                type: 'search-confirmation',
+                content: JSON.stringify(config)
+            }]);
+
+        } catch (error) {
+            console.error("Initial analysis failed", error);
+            // Fallback
+            setMessages(prev => [...prev, {
+                role: 'model',
+                type: 'search-confirmation',
+                content: JSON.stringify({
+                    keywords: topic,
+                    scopusCount: 15,
+                    geminiCount: 15,
+                    originalMessage: topic,
+                    languages: ['en'],
+                    dateRange: { start: 2020, end: 2025 }
+                })
+            }]);
+        } finally {
+            setLoadingStatus("");
+        }
+    };
 
     // Auto-save Main Content (Manuscript)
     const lastSaveRef = useRef<number>(Date.now());
@@ -403,12 +544,15 @@ Rules:
                     const languageInstruction = languageName && languageName !== 'English'
                         ? `\n- Focus on papers with titles/abstracts in ${languageName} or about ${languageName}-speaking regions when relevant.`
                         : '';
+                    const userInstructions = (config as any).additionalInstructions
+                        ? `\n- User's additional requirements: ${(config as any).additionalInstructions}`
+                        : '';
 
                     const prompt = `You are a research assistant. Use Google Search to find ${limit} REAL, EXISTING, and VERIFIED academic papers (${startYear}-${endYear}) about: "${searchQuery}".
                 
                 IMPORTANT:
                 - Use the "googleSearch" tool to verify the existence of each paper.
-                - Do NOT hallucinate papers.${languageInstruction}
+                - Do NOT hallucinate papers.${languageInstruction}${userInstructions}
                 - Return JSON ONLY.
 
                 Return JSON: {"articles":[{"authors":"...","title":"...","source":"...","year":"...","abstract":"...","doi":"..."}]}`;

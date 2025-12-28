@@ -54,6 +54,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             router.push('/'); // Redirect to home after login
         } catch (error: any) {
             console.error("Login Failed", error);
+            // Suppress benign popup cancellation errors
+            if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') {
+                return;
+            }
             setError(error.message || 'Login failed');
         }
     };
