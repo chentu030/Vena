@@ -1666,7 +1666,6 @@ Rules:
                 const data = await res.json();
                 const aiMessage = { role: 'model', content: data.text } as Message;
                 const updatedMessages = [...newMessages, aiMessage];
-                const updatedMessages = [...newMessages, aiMessage];
                 setMessages(updatedMessages);
 
                 // Auto-update Draft
