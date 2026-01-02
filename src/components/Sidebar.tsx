@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { LayoutDashboard, Compass, Settings, LogOut, ChevronLeft, ChevronRight, Users, MessageSquare, Sun, Moon, Home, Globe } from 'lucide-react';
+import { LayoutDashboard, Compass, Settings, LogOut, ChevronLeft, ChevronRight, Users, MessageSquare, Sun, Moon, Home, Globe, Puzzle } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
@@ -22,14 +22,15 @@ export default function Sidebar() {
         { name: t('sidebar.teams'), icon: Users, path: '/teams' },
         { name: t('sidebar.community'), icon: Globe, path: '/community' },
         { name: t('sidebar.explore'), icon: Compass, path: '/explore' },
+        { name: t('sidebar.extensions'), icon: Puzzle, path: '/extensions' },
     ];
 
     return (
         <aside
             className={`${isCollapsed ? 'w-20' : 'w-64'} h-screen sticky top-0 bg-white dark:bg-neutral-900 border-r border-border flex flex-col z-40 transition-all duration-300 flex-shrink-0`}
         >
-            <div className={`h-20 flex items-center ${isCollapsed ? 'justify-center' : 'px-6'} border-b border-border transition-all`}>
-                <img src="/venalium_logo.png" alt="Venalium" className="w-8 h-8 rounded-lg" />
+            <div className={`h-20 flex items-center justify-center border-b border-border transition-all`}>
+                <img src="/venalium.png" alt="Venalium" className="w-8 h-8 rounded-lg dark:invert" />
                 {!isCollapsed && <span className="font-bold text-lg font-serif ml-3 transition-opacity">Venalium</span>}
             </div>
 

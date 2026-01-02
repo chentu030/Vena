@@ -81,7 +81,7 @@ export default function LandingPage() {
                         {/* Navigation */}
                         <header className="sticky top-0 w-full z-50 px-6 py-6 flex items-center justify-between backdrop-blur-md bg-white/5 dark:bg-black/5 border-b border-white/5 transition-all duration-300">
                             <div className="flex items-center gap-3 group cursor-pointer" onClick={() => router.push('/')}>
-                                <img src="/venalium_logo.png" alt="Venalium" className="w-10 h-10 rounded-xl shadow-lg shadow-blue-500/20 group-hover:scale-105 transition-transform duration-300" />
+                                <img src="/venalium.png" alt="Venalium" className="w-10 h-10 rounded-xl group-hover:scale-105 transition-transform duration-300 dark:invert" />
                                 <span className="font-bold text-xl font-serif text-neutral-900 dark:text-white tracking-tight">Venalium.</span>
                             </div>
                             <button
