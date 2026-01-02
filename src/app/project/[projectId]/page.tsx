@@ -1739,17 +1739,17 @@ Rules:
             }
         }
     }
-};
 
-// Auto-update Draft Background Function
-const updateDraftBackground = async (history: Message[], currentDraft: string) => {
-    if (!isAutoSyncEnabled) return;
 
-    setIsDraftUpdating(true);
-    try {
-        // Take the last few messages for context (e.g., last 4 turns = 8 messages)
-        const recentContext = history.slice(-6).map(m => `${m.role}: ${m.content}`).join('\n');
-        const prompt = `You are an automated meeting minute taker. 
+    // Auto-update Draft Background Function
+    const updateDraftBackground = async (history: Message[], currentDraft: string) => {
+        if (!isAutoSyncEnabled) return;
+
+        setIsDraftUpdating(true);
+        try {
+            // Take the last few messages for context (e.g., last 4 turns = 8 messages)
+            const recentContext = history.slice(-6).map(m => `${m.role}: ${m.content}`).join('\n');
+            const prompt = `You are an automated meeting minute taker. 
             Update the following meeting minutes based on the latest conversation.
             
             Current Minutes:
@@ -1766,871 +1766,871 @@ const updateDraftBackground = async (history: Message[], currentDraft: string) =
             
             Output ONLY the updated meeting minutes content (Markdown).`;
 
-        const res = await fetch('/api/gemini', {
-            method: 'POST',
-            body: JSON.stringify({
-                model: 'gemini-3-flash-preview', // Use Flash for speed
-                task: 'summary',
-                prompt: prompt,
-                history: [] // Stateless update
-            })
-        });
+            const res = await fetch('/api/gemini', {
+                method: 'POST',
+                body: JSON.stringify({
+                    model: 'gemini-3-flash-preview', // Use Flash for speed
+                    task: 'summary',
+                    prompt: prompt,
+                    history: [] // Stateless update
+                })
+            });
 
-        const data = await res.json();
-        if (data.text) {
-            setPaperContent(data.text);
-            // Note: Auto-save effect will catch this change
-        }
-    } catch (e) {
-        console.error("Background draft update failed", e);
-    } finally {
-        setIsDraftUpdating(false);
-    }
-};
-
-const handleGroupChange = (groupId: string) => {
-    const group = researchGroups.find(g => g.id === groupId);
-    if (group) {
-        setCurrentGroupId(groupId);
-        setCurrentResearchResults(group.papers || []);
-    }
-};
-
-const handleGroupAutoSave = (papers: any[]) => {
-    if (!currentGroupId || !user || !projectId) return;
-    setResearchGroups(prev => {
-        return prev.map(g => g.id === currentGroupId ? { ...g, papers, updatedAt: new Date().toISOString() } : g);
-    });
-    // We defer the actual save to the debounce effect in ResearchPanel, but we update local state here
-    // Actually ResearchPanel calls onAutoSave which should probably trigger the save...
-    // ResearchPanel handles saving to firebase directly via onAutoSave usually? 
-    // Wait, the ResearchPanel uses 'onAutoSave' which calls 'handleGroupAutoSave'.
-    // Let's ensure we save to Firestore here too or rely on ResearchPanel?
-    // Current implementation of 'handleGroupAutoSave' only updates state. 
-    // ResearchPanel has a debounce effect that might be saving, or we should save here.
-    // Assuming ResearchPanel's debounced save is for `results` state, but let's just make sure we save the group here.
-    const group = researchGroups.find(g => g.id === currentGroupId);
-    if (group) {
-        saveDocument(user.uid, 'researchGroups', { ...group, papers, updatedAt: new Date().toISOString() }, projectId);
-    }
-};
-
-const handleMovePapers = async (papers: ResearchArticle[], targetGroupId: string) => {
-    if (!user || !projectId) return;
-
-    setResearchGroups((prev: ResearchGroup[]) => {
-        const newGroups = prev.map((g: ResearchGroup) => ({ ...g, papers: [...g.papers] })); // Deep copy structure
-        const targetG = newGroups.find((g: ResearchGroup) => g.id === targetGroupId);
-        if (!targetG) return prev;
-
-        // Add papers to target group (avoiding duplicates)
-        const existingIds = new Set(targetG.papers.map((p: ResearchArticle) => p.id));
-        papers.forEach((p: ResearchArticle) => {
-            if (!existingIds.has(p.id)) {
-                targetG.papers.push(p);
+            const data = await res.json();
+            if (data.text) {
+                setPaperContent(data.text);
+                // Note: Auto-save effect will catch this change
             }
-        });
-        targetG.updatedAt = new Date().toISOString();
-
-        // Remove from current group (if currentGroupId is set)
-        if (currentGroupId && currentGroupId !== targetGroupId) {
-            const currentG = newGroups.find((g: ResearchGroup) => g.id === currentGroupId);
-            if (currentG) {
-                currentG.papers = currentG.papers.filter((p: ResearchArticle) => !papers.some((moved: ResearchArticle) => moved.id === p.id));
-                currentG.updatedAt = new Date().toISOString();
-            }
-        }
-
-        // Save changes
-        saveDocument(user.uid, 'researchGroups', targetG, projectId);
-
-        if (currentGroupId && currentGroupId !== targetGroupId) {
-            const currentG = newGroups.find((g: ResearchGroup) => g.id === currentGroupId);
-            if (currentG) saveDocument(user.uid, 'researchGroups', currentG, projectId);
-        }
-
-        return newGroups;
-    });
-
-    // Update current results if we are viewing the source group
-    if (currentGroupId && currentGroupId !== targetGroupId) {
-        setCurrentResearchResults((prev: ResearchArticle[]) => prev.filter((p: ResearchArticle) => !papers.some((moved: ResearchArticle) => moved.id === p.id)));
-    }
-};
-
-
-// --- OTHER HANDLERS (Drafts, Maps, etc.) ---
-// need to scope these to projectId as well
-const handleNewDraft = () => {
-    setCurrentDraftId(null);
-    setPaperContent('');
-    setSidebarView('draft');
-};
-// --- AI Helpers ---
-const handleAskAI = async (command: string, section: string) => {
-    setIsLoading(true);
-    try {
-        setLoadingStatus("Thinking...");
-        const res = await fetch('/api/gemini', {
-            method: 'POST',
-            body: JSON.stringify({ task: 'summary', prompt: command === 'structure' ? `Generate concise academic paper structure (Markdown).` : `Write content for section '${section}'. \nPaper:\n${paperContent}` })
-        });
-        const data = await res.json();
-        setPaperContent(prev => prev + '\n' + data.text);
-    } catch (e) { } finally { setIsLoading(false); }
-};
-
-const generateAiTitle = async (content: string, type: 'Draft' | 'Mind Map' | 'Chat') => {
-    try {
-        const response = await fetch('/api/gemini', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                prompt: `Generate a very short, concise title (max 10 characters, Chinese or English) for this ${type}. \n\nContent:\n${content.substring(0, 500)}`,
-                systemInstruction: "You are a helpful assistant. Output ONLY the title, no quotes."
-            })
-        });
-        const data = await response.json();
-        return data.response.trim().substring(0, 15); // Safety clip
-    } catch (e) {
-        return null;
-    }
-};
-
-const handleNewManuscript = () => {
-    setCurrentManuscriptId(null);
-    setMainContent('');
-    setSidebarView('main');
-};
-
-// Auto-Save Draft
-useEffect(() => {
-    if (!paperContent || !user || !projectId) return;
-
-    const timer = setTimeout(async () => {
-        const now = new Date();
-        const newId = currentDraftId || now.getTime().toString();
-
-        // Check if we need to generate a title
-        let title = '';
-        const existing = savedDrafts.find(d => d.id === newId);
-
-        if (existing) {
-            title = existing.title;
-        } else {
-            const aiTitle = await generateAiTitle(paperContent, 'Draft');
-            title = aiTitle || paperContent.split('\n')[0].substring(0, 10) || t('draft.new_draft');
-        }
-
-        setSavedDrafts(prev => {
-            const draftData = {
-                id: newId,
-                title,
-                content: paperContent,
-                createdAt: existing?.createdAt || now.toISOString(),
-                date: now.toISOString()
-            };
-
-            const others = prev.filter(d => d.id !== newId);
-            const updated = [draftData, ...others];
-
-            if (!isReadOnly && targetUserId) saveDocument(targetUserId, 'drafts', draftData, projectId);
-            if (!currentDraftId) setCurrentDraftId(newId);
-
-            return updated;
-        });
-    }, 2000);
-
-    return () => clearTimeout(timer);
-}, [paperContent, currentDraftId, savedDrafts, user, projectId]);
-
-// Auto-Save Manuscript
-useEffect(() => {
-    // Guard: Need user and project. 
-    if (!user || !projectId) return;
-    // Guard: If it's a NEW manuscript (no ID) and empty, don't save yet.
-    // But if it HAS an ID, we must save even if empty (user deleted text).
-    if (!currentManuscriptId && (!mainContent || !mainContent.trim())) return;
-
-    setSaveStatus('saving');
-
-    const timer = setTimeout(async () => {
-        const now = new Date();
-        const newId = currentManuscriptId || `manuscript_${now.getTime()}`;
-
-        // Check if we need to generate a title
-        let title = '';
-        const existing = savedManuscriptsRef.current.find(m => m.id === newId);
-
-        if (existing) {
-            title = existing.title;
-        } else {
-            title = t('manuscript.default_title', { date: now.toLocaleDateString() });
-            if (mainContent && mainContent.length > 5) {
-                const firstLine = mainContent.split('\n').find(l => l.trim().length > 0) || '';
-                if (firstLine) title = firstLine.replace(/[#*]/g, '').trim().substring(0, 20);
-            }
-        }
-
-        setSavedManuscripts(prev => {
-            const docData = {
-                id: newId,
-                title,
-                content: mainContent || '', // Ensure empty string if null
-                updatedAt: new Date().toISOString()
-            };
-
-            const others = prev.filter(m => m.id !== newId);
-            const updated = [docData, ...others];
-
-            if (!isReadOnly && targetUserId) {
-                saveDocument(targetUserId, 'manuscripts', docData, projectId)
-                    .then(() => {
-                        console.log(`Saved manuscript ${newId}`);
-                        setSaveStatus('saved');
-                    })
-                    .catch(err => {
-                        console.error("Failed to save manuscript", err);
-                        setSaveStatus('error');
-                    });
-            } else {
-                setSaveStatus('saved');
-            }
-
-            if (!currentManuscriptId) setCurrentManuscriptId(newId);
-
-            return updated;
-        });
-    }, 800); // Reduced debounce for safer saving
-
-    return () => clearTimeout(timer);
-}, [mainContent, currentManuscriptId, user, projectId]);
-
-// Rename Handler
-const handleRename = async (collectionType: 'draft' | 'map' | 'chat' | 'manuscript' | 'research', id: string, newTitle: string) => {
-    if (!user || !projectId) return;
-
-    const collectionMap: Record<string, CollectionName> = {
-        'draft': 'drafts',
-        'map': 'maps',
-        'chat': 'chats',
-        'manuscript': 'manuscripts',
-        'research': 'research'
-    };
-    const collectionName = collectionMap[collectionType];
-    if (!collectionName) return;
-
-    const updateList = (list: any[], setList: any, collection: CollectionName) => {
-        const item = list.find(i => i.id === id);
-        if (item) {
-            const updatedItem = { ...item, title: newTitle, updatedAt: new Date().toISOString() };
-            setList(list.map(i => i.id === id ? updatedItem : i));
-            if (!isReadOnly && targetUserId) saveDocument(targetUserId, collection, updatedItem, projectId);
+        } catch (e) {
+            console.error("Background draft update failed", e);
+        } finally {
+            setIsDraftUpdating(false);
         }
     };
 
-    if (collectionType === 'draft') updateList(savedDrafts, setSavedDrafts, 'drafts');
-    if (collectionType === 'map') updateList(savedMaps, setSavedMaps, 'maps');
-    if (collectionType === 'chat') updateList(savedChats, setSavedChats, 'chats');
-    if (collectionType === 'manuscript') updateList(savedManuscripts, setSavedManuscripts, 'manuscripts');
-    if (collectionType === 'research') updateList(savedResearch, setSavedResearch, 'research');
-};
-
-
-// ... Maps Loading/Saving ...
-// Memoize the parsed data to prevent SystemMapPanel from resetting on every render
-// eslint-disable-next-line react-hooks/exhaustive-deps
-const parsedMindMapData = React.useMemo(() => {
-    if (!mindMapCode) return null;
-    try {
-        return typeof mindMapCode === 'string' ? JSON.parse(mindMapCode) : mindMapCode;
-    } catch (e) {
-        console.error("Failed to parse mind map code", e);
-        return null;
-    }
-}, [mindMapCode]);
-
-// Use a map key to force reload in SystemMapPanel when generating/loading new maps
-const [mapKey, setMapKey] = useState<string>('');
-useEffect(() => {
-    if (!mapKey) setMapKey(currentMapId || `map-${Date.now()}`);
-}, [currentMapId, mapKey]);
-
-// Auto save map
-// Auto-save Main Chat Messages
-useEffect(() => {
-    if (!messages || messages.length === 0 || !user || !projectId) return;
-
-    const canSave = isOwner || (!isReadOnly && targetUserId);
-    if (!canSave || !targetUserId) return;
-
-    const timer = setTimeout(() => {
-        saveProjectData(targetUserId, 'currentChat', { messages }, projectId)
-            .then(() => console.log("Chat Saved"))
-            .catch(e => console.error("Chat Save Failed", e));
-    }, 3000);
-
-    return () => clearTimeout(timer);
-}, [messages, user, projectId, targetUserId, isOwner, isReadOnly]);
-
-// Auto save map
-const handleAutoSaveMap = React.useCallback((mapData: { nodes: any[], edges: any[] }) => {
-    const { nodes, edges } = mapData;
-
-    // Safeguard: Do not save if empty (prevents overwriting good data with init state)
-    if (nodes.length === 0) {
-        console.log("Skipping save: Empty nodes");
-        return;
-    }
-
-    const data = JSON.stringify({ nodes, edges });
-    setMindMapCode(data);
-    if (user && projectId) {
-        console.log("Attempting AutoSave Map:", { isReadOnly, targetUserId, isOwner });
-
-        // Allow save if we are owner OR if public editing is allowed
-        const canSave = isOwner || (!isReadOnly && targetUserId);
-
-        if (canSave && targetUserId) {
-            saveProjectData(targetUserId, 'currentMap', { data }, projectId)
-                .then(() => console.log("Map ProjectData Saved Successfully"))
-                .catch(e => console.error("Map Save Failed", e));
-        } else {
-            console.warn("Save blocked", { isOwner, isReadOnly, targetUserId });
+    const handleGroupChange = (groupId: string) => {
+        const group = researchGroups.find(g => g.id === groupId);
+        if (group) {
+            setCurrentGroupId(groupId);
+            setCurrentResearchResults(group.papers || []);
         }
-    }
+    };
 
-    // Also save to 'maps' collection as history
-    if (user && projectId) {
-        const now = new Date();
-        const newId = currentMapId || now.getTime().toString();
+    const handleGroupAutoSave = (papers: any[]) => {
+        if (!currentGroupId || !user || !projectId) return;
+        setResearchGroups(prev => {
+            return prev.map(g => g.id === currentGroupId ? { ...g, papers, updatedAt: new Date().toISOString() } : g);
+        });
+        // We defer the actual save to the debounce effect in ResearchPanel, but we update local state here
+        // Actually ResearchPanel calls onAutoSave which should probably trigger the save...
+        // ResearchPanel handles saving to firebase directly via onAutoSave usually? 
+        // Wait, the ResearchPanel uses 'onAutoSave' which calls 'handleGroupAutoSave'.
+        // Let's ensure we save to Firestore here too or rely on ResearchPanel?
+        // Current implementation of 'handleGroupAutoSave' only updates state. 
+        // ResearchPanel has a debounce effect that might be saving, or we should save here.
+        // Assuming ResearchPanel's debounced save is for `results` state, but let's just make sure we save the group here.
+        const group = researchGroups.find(g => g.id === currentGroupId);
+        if (group) {
+            saveDocument(user.uid, 'researchGroups', { ...group, papers, updatedAt: new Date().toISOString() }, projectId);
+        }
+    };
 
-        const sanitizeForFirestore = (obj: any): any => {
-            try {
-                return JSON.parse(JSON.stringify(obj, (key, value) => {
-                    if (typeof value === 'function') return undefined;
-                    if (key.startsWith('__')) return undefined;
-                    return value;
-                }));
-            } catch (e) { return []; }
-        };
+    const handleMovePapers = async (papers: ResearchArticle[], targetGroupId: string) => {
+        if (!user || !projectId) return;
 
-        setSavedMaps(prev => {
-            const existing = prev.find(m => m.id === newId);
-            const title = existing?.title || t('map.default_title', { date: now.toLocaleDateString() });
+        setResearchGroups((prev: ResearchGroup[]) => {
+            const newGroups = prev.map((g: ResearchGroup) => ({ ...g, papers: [...g.papers] })); // Deep copy structure
+            const targetG = newGroups.find((g: ResearchGroup) => g.id === targetGroupId);
+            if (!targetG) return prev;
 
-            const newMap = {
-                id: newId,
-                title,
-                nodes: sanitizeForFirestore(nodes),
-                edges: sanitizeForFirestore(edges),
-                createdAt: existing?.createdAt || now.toISOString(),
-                date: now.toISOString()
-            };
+            // Add papers to target group (avoiding duplicates)
+            const existingIds = new Set(targetG.papers.map((p: ResearchArticle) => p.id));
+            papers.forEach((p: ResearchArticle) => {
+                if (!existingIds.has(p.id)) {
+                    targetG.papers.push(p);
+                }
+            });
+            targetG.updatedAt = new Date().toISOString();
 
-            const others = prev.filter(m => m.id !== newId);
-            const updated = [newMap, ...others];
-
-            // Save inside the callback to ensure state is fresh
-            const canSave = isOwner || (!isReadOnly && targetUserId);
-            if (canSave && targetUserId) {
-                saveDocument(targetUserId, 'maps', newMap, projectId)
-                    .then(() => console.log("History Map Saved"))
-                    .catch(e => console.error("History Save Failed", e));
+            // Remove from current group (if currentGroupId is set)
+            if (currentGroupId && currentGroupId !== targetGroupId) {
+                const currentG = newGroups.find((g: ResearchGroup) => g.id === currentGroupId);
+                if (currentG) {
+                    currentG.papers = currentG.papers.filter((p: ResearchArticle) => !papers.some((moved: ResearchArticle) => moved.id === p.id));
+                    currentG.updatedAt = new Date().toISOString();
+                }
             }
 
-            return updated;
+            // Save changes
+            saveDocument(user.uid, 'researchGroups', targetG, projectId);
+
+            if (currentGroupId && currentGroupId !== targetGroupId) {
+                const currentG = newGroups.find((g: ResearchGroup) => g.id === currentGroupId);
+                if (currentG) saveDocument(user.uid, 'researchGroups', currentG, projectId);
+            }
+
+            return newGroups;
         });
 
-        if (!currentMapId) setCurrentMapId(newId);
-    }
-}, [user, projectId, isReadOnly, targetUserId, currentMapId]);
+        // Update current results if we are viewing the source group
+        if (currentGroupId && currentGroupId !== targetGroupId) {
+            setCurrentResearchResults((prev: ResearchArticle[]) => prev.filter((p: ResearchArticle) => !papers.some((moved: ResearchArticle) => moved.id === p.id)));
+        }
+    };
 
-const handleAutoSaveChats = React.useCallback((chats: any) => {
-    // Safeguard: Do not save if empty object
-    if (!chats || Object.keys(chats).length === 0) return;
 
-    setActiveNodeChats(chats);
-    // Persist to project data
-    if (user && projectId) {
-        const now = new Date();
-        const newId = currentChatsId || now.getTime().toString();
-
-        setSavedChats(prev => {
-            const existing = prev.find(c => c.id === newId);
-            const title = existing?.title || t('chat.default_title', { date: now.toLocaleDateString() });
-
-            const newChats = {
-                id: newId,
-                title,
-                chats,
-                createdAt: existing?.createdAt || now.toISOString(),
-                date: now.toISOString()
-            };
-
-            const others = prev.filter(c => c.id !== newId);
-            const updated = [newChats, ...others];
-
-            if (!isReadOnly && targetUserId) saveDocument(targetUserId, 'chats', newChats, projectId);
-            return updated;
-        });
-
-        if (!currentChatsId) setCurrentChatsId(newId);
-    }
-}, [user, projectId, isReadOnly, targetUserId, currentChatsId]);
-
-// HISTORY HANDLERS
-const onLoadDraft = (id: string) => {
-    const draft = savedDrafts.find(d => d.id === id);
-    if (draft) {
-        setPaperContent(draft.content);
-        setCurrentDraftId(draft.id);
-        setSidebarView('draft');
-        setHistoryOpen(false);
-    }
-};
-
-const onLoadMap = (id: string) => {
-    const map = savedMaps.find(m => m.id === id);
-    if (map) {
-        setMindMapCode(JSON.stringify({ nodes: map.nodes, edges: map.edges }));
-        setCurrentMapId(map.id);
-        setMapKey(Date.now().toString());
-        setSidebarView('map');
-        setHistoryOpen(false);
-    }
-};
-
-const onLoadChats = (id: string) => {
-    const history = savedChats.find(c => c.id === id);
-    if (history) {
-        setActiveNodeChats(history.chats);
-        setCurrentChatsId(history.id);
-        setSidebarView('map');
-        setHistoryOpen(false);
-    }
-};
-
-// Citation Normalizer Helper
-const normalizeCitations = (content: string) => {
-    if (!content) return content;
-    // 1. Unescape escaped brackets if present: \[ID:1\] -> [ID:1]
-    let processed = content.replace(/\\\[ID:([\d\s,]+)\\\]/g, '[ID:$1]');
-    // 2. Convert [ID:x, y] -> [x, y]
-    processed = processed.replace(/\[ID:([\d\s,]+)\]/g, '[$1]');
-    return processed;
-};
-
-const onLoadManuscript = (id: any) => {
-    const m = savedManuscripts.find(d => d.id === id);
-    if (m) {
-        // Apply normalization on load
-        const cleanContent = normalizeCitations(m.content);
-        setMainContent(cleanContent);
-        setCurrentManuscriptId(m.id);
-        setSidebarView('main');
-        setHistoryOpen(false);
-    }
-};
-
-// Deletion Handlers
-const onDeleteDraft = (id: string) => {
-    setSavedDrafts(prev => prev.filter(d => d.id !== id));
-    if (!isReadOnly && targetUserId) deleteDocument(targetUserId, 'drafts', id, projectId);
-    if (currentDraftId === id) {
+    // --- OTHER HANDLERS (Drafts, Maps, etc.) ---
+    // need to scope these to projectId as well
+    const handleNewDraft = () => {
         setCurrentDraftId(null);
         setPaperContent('');
-    }
-};
+        setSidebarView('draft');
+    };
+    // --- AI Helpers ---
+    const handleAskAI = async (command: string, section: string) => {
+        setIsLoading(true);
+        try {
+            setLoadingStatus("Thinking...");
+            const res = await fetch('/api/gemini', {
+                method: 'POST',
+                body: JSON.stringify({ task: 'summary', prompt: command === 'structure' ? `Generate concise academic paper structure (Markdown).` : `Write content for section '${section}'. \nPaper:\n${paperContent}` })
+            });
+            const data = await res.json();
+            setPaperContent(prev => prev + '\n' + data.text);
+        } catch (e) { } finally { setIsLoading(false); }
+    };
 
-const onDeleteMap = (id: string) => {
-    setSavedMaps(prev => prev.filter(m => m.id !== id));
-    if (!isReadOnly && targetUserId) deleteDocument(targetUserId, 'maps', id, projectId);
-    if (currentMapId === id) {
-        setCurrentMapId(null);
-        setMindMapCode(null);
-    }
-};
+    const generateAiTitle = async (content: string, type: 'Draft' | 'Mind Map' | 'Chat') => {
+        try {
+            const response = await fetch('/api/gemini', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prompt: `Generate a very short, concise title (max 10 characters, Chinese or English) for this ${type}. \n\nContent:\n${content.substring(0, 500)}`,
+                    systemInstruction: "You are a helpful assistant. Output ONLY the title, no quotes."
+                })
+            });
+            const data = await response.json();
+            return data.response.trim().substring(0, 15); // Safety clip
+        } catch (e) {
+            return null;
+        }
+    };
 
-const onDeleteChats = (id: string) => {
-    setSavedChats(prev => prev.filter(c => c.id !== id));
-    if (!isReadOnly && targetUserId) deleteDocument(targetUserId, 'chats', id, projectId);
-    if (currentChatsId === id) {
-        setCurrentChatsId(null);
-        setActiveNodeChats(null);
-    }
-};
-
-const onDeleteManuscript = (id: string) => {
-    if (!isReadOnly && targetUserId) deleteDocument(targetUserId, 'manuscripts', id, projectId);
-    setSavedManuscripts(prev => prev.filter(m => m.id !== id));
-    if (currentManuscriptId === id) {
+    const handleNewManuscript = () => {
         setCurrentManuscriptId(null);
         setMainContent('');
-    }
-};
+        setSidebarView('main');
+    };
 
-// Research Handlers
-const handleSaveResearch = (results: any[]) => {
-    if (!user || !projectId) return;
-    const now = new Date();
-    const newId = currentResearchId || now.getTime().toString();
-    const title = t('research.default_title', { date: now.toLocaleDateString(), count: results.length });
+    // Auto-Save Draft
+    useEffect(() => {
+        if (!paperContent || !user || !projectId) return;
 
-    setSavedResearch(prev => {
-        const item = {
-            id: newId,
-            title,
-            results,
-            createdAt: now.toISOString(),
-            date: now.toISOString()
+        const timer = setTimeout(async () => {
+            const now = new Date();
+            const newId = currentDraftId || now.getTime().toString();
+
+            // Check if we need to generate a title
+            let title = '';
+            const existing = savedDrafts.find(d => d.id === newId);
+
+            if (existing) {
+                title = existing.title;
+            } else {
+                const aiTitle = await generateAiTitle(paperContent, 'Draft');
+                title = aiTitle || paperContent.split('\n')[0].substring(0, 10) || t('draft.new_draft');
+            }
+
+            setSavedDrafts(prev => {
+                const draftData = {
+                    id: newId,
+                    title,
+                    content: paperContent,
+                    createdAt: existing?.createdAt || now.toISOString(),
+                    date: now.toISOString()
+                };
+
+                const others = prev.filter(d => d.id !== newId);
+                const updated = [draftData, ...others];
+
+                if (!isReadOnly && targetUserId) saveDocument(targetUserId, 'drafts', draftData, projectId);
+                if (!currentDraftId) setCurrentDraftId(newId);
+
+                return updated;
+            });
+        }, 2000);
+
+        return () => clearTimeout(timer);
+    }, [paperContent, currentDraftId, savedDrafts, user, projectId]);
+
+    // Auto-Save Manuscript
+    useEffect(() => {
+        // Guard: Need user and project. 
+        if (!user || !projectId) return;
+        // Guard: If it's a NEW manuscript (no ID) and empty, don't save yet.
+        // But if it HAS an ID, we must save even if empty (user deleted text).
+        if (!currentManuscriptId && (!mainContent || !mainContent.trim())) return;
+
+        setSaveStatus('saving');
+
+        const timer = setTimeout(async () => {
+            const now = new Date();
+            const newId = currentManuscriptId || `manuscript_${now.getTime()}`;
+
+            // Check if we need to generate a title
+            let title = '';
+            const existing = savedManuscriptsRef.current.find(m => m.id === newId);
+
+            if (existing) {
+                title = existing.title;
+            } else {
+                title = t('manuscript.default_title', { date: now.toLocaleDateString() });
+                if (mainContent && mainContent.length > 5) {
+                    const firstLine = mainContent.split('\n').find(l => l.trim().length > 0) || '';
+                    if (firstLine) title = firstLine.replace(/[#*]/g, '').trim().substring(0, 20);
+                }
+            }
+
+            setSavedManuscripts(prev => {
+                const docData = {
+                    id: newId,
+                    title,
+                    content: mainContent || '', // Ensure empty string if null
+                    updatedAt: new Date().toISOString()
+                };
+
+                const others = prev.filter(m => m.id !== newId);
+                const updated = [docData, ...others];
+
+                if (!isReadOnly && targetUserId) {
+                    saveDocument(targetUserId, 'manuscripts', docData, projectId)
+                        .then(() => {
+                            console.log(`Saved manuscript ${newId}`);
+                            setSaveStatus('saved');
+                        })
+                        .catch(err => {
+                            console.error("Failed to save manuscript", err);
+                            setSaveStatus('error');
+                        });
+                } else {
+                    setSaveStatus('saved');
+                }
+
+                if (!currentManuscriptId) setCurrentManuscriptId(newId);
+
+                return updated;
+            });
+        }, 800); // Reduced debounce for safer saving
+
+        return () => clearTimeout(timer);
+    }, [mainContent, currentManuscriptId, user, projectId]);
+
+    // Rename Handler
+    const handleRename = async (collectionType: 'draft' | 'map' | 'chat' | 'manuscript' | 'research', id: string, newTitle: string) => {
+        if (!user || !projectId) return;
+
+        const collectionMap: Record<string, CollectionName> = {
+            'draft': 'drafts',
+            'map': 'maps',
+            'chat': 'chats',
+            'manuscript': 'manuscripts',
+            'research': 'research'
         };
-        const others = prev.filter(r => r.id !== newId);
-        const updated = [item, ...others];
-        if (!isReadOnly && targetUserId) saveDocument(targetUserId, 'research', item, projectId);
-        if (!currentResearchId) setCurrentResearchId(newId);
-        return updated;
-    });
-};
+        const collectionName = collectionMap[collectionType];
+        if (!collectionName) return;
 
-const onLoadResearch = (id: string) => {
-    const item = savedResearch.find(r => r.id === id);
-    if (item) {
-        setCurrentResearchResults(item.results);
-        setCurrentResearchId(item.id);
-        setSidebarView('research');
-        setHistoryOpen(false);
-    }
-};
+        const updateList = (list: any[], setList: any, collection: CollectionName) => {
+            const item = list.find(i => i.id === id);
+            if (item) {
+                const updatedItem = { ...item, title: newTitle, updatedAt: new Date().toISOString() };
+                setList(list.map(i => i.id === id ? updatedItem : i));
+                if (!isReadOnly && targetUserId) saveDocument(targetUserId, collection, updatedItem, projectId);
+            }
+        };
 
-const onDeleteResearch = (id: string) => {
-    setSavedResearch(prev => prev.filter(r => r.id !== id));
-    if (!isReadOnly && targetUserId) deleteDocument(targetUserId, 'research', id, projectId);
-    if (currentResearchId === id) {
-        setCurrentResearchId(null);
-        setCurrentResearchResults([]);
-    }
-};
+        if (collectionType === 'draft') updateList(savedDrafts, setSavedDrafts, 'drafts');
+        if (collectionType === 'map') updateList(savedMaps, setSavedMaps, 'maps');
+        if (collectionType === 'chat') updateList(savedChats, setSavedChats, 'chats');
+        if (collectionType === 'manuscript') updateList(savedManuscripts, setSavedManuscripts, 'manuscripts');
+        if (collectionType === 'research') updateList(savedResearch, setSavedResearch, 'research');
+    };
 
 
-if (loading || !user) {
-    return (
-        <div className="h-screen flex items-center justify-center bg-background" suppressHydrationWarning={true}>
-            <Loader2 className="animate-spin text-blue-500" size={32} />
-        </div>
-    );
-}
+    // ... Maps Loading/Saving ...
+    // Memoize the parsed data to prevent SystemMapPanel from resetting on every render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const parsedMindMapData = React.useMemo(() => {
+        if (!mindMapCode) return null;
+        try {
+            return typeof mindMapCode === 'string' ? JSON.parse(mindMapCode) : mindMapCode;
+        } catch (e) {
+            console.error("Failed to parse mind map code", e);
+            return null;
+        }
+    }, [mindMapCode]);
 
-return (
-    <div suppressHydrationWarning className="flex h-screen overflow-hidden bg-background text-foreground transition-colors duration-500 relative">
-        {/* Back to Previous Page Button */}
-        <button
-            onClick={() => {
-                const fromPath = searchParams.get('from');
-                router.push(fromPath || '/dashboard');
-            }}
-            className="fixed top-4 left-4 z-[60] p-2 bg-white/50 dark:bg-black/50 backdrop-blur rounded-full hover:bg-white dark:hover:bg-black transition-all shadow-sm border border-border/50"
-            title={t('common.back')}
-        >
-            <ArrowLeft size={20} />
-        </button>
+    // Use a map key to force reload in SystemMapPanel when generating/loading new maps
+    const [mapKey, setMapKey] = useState<string>('');
+    useEffect(() => {
+        if (!mapKey) setMapKey(currentMapId || `map-${Date.now()}`);
+    }, [currentMapId, mapKey]);
 
-        {/* History Sidebar */}
-        <HistorySidebar
-            isOpen={historyOpen}
-            onClose={() => setHistoryOpen(false)}
-            savedDrafts={savedDrafts}
-            savedMaps={savedMaps}
-            savedChats={savedChats}
-            savedManuscripts={savedManuscripts}
-            onLoadDraft={onLoadDraft}
-            onLoadMap={onLoadMap}
-            onLoadChats={onLoadChats}
-            onLoadManuscript={onLoadManuscript}
-            onDeleteDraft={onDeleteDraft}
-            onDeleteMap={onDeleteMap}
-            onDeleteChats={onDeleteChats}
-            onDeleteManuscript={onDeleteManuscript}
-            savedResearch={savedResearch}
-            onLoadResearch={onLoadResearch}
-            onDeleteResearch={onDeleteResearch}
-            onRename={handleRename}
-            onNewDraft={handleNewDraft}
-            onNewManuscript={handleNewManuscript}
-        />
+    // Auto save map
+    // Auto-save Main Chat Messages
+    useEffect(() => {
+        if (!messages || messages.length === 0 || !user || !projectId) return;
 
-        {/* Toggle History Button - Draggable */}
-        <div
-            className={`fixed right-0 z-[55] transform transition-transform duration-300 ${historyOpen ? 'translate-x-full' : 'translate-x-0'}`}
-            style={{ top: `${historyButtonY}%` }}
-            onMouseDown={(e) => {
-                e.preventDefault();
-                const startY = e.clientY;
-                const startTop = historyButtonY;
-                let hasMoved = false;
+        const canSave = isOwner || (!isReadOnly && targetUserId);
+        if (!canSave || !targetUserId) return;
 
-                const handleMouseMove = (moveEvent: MouseEvent) => {
-                    const deltaY = Math.abs(moveEvent.clientY - startY);
-                    if (deltaY > 5) hasMoved = true; // Threshold for drag detection
+        const timer = setTimeout(() => {
+            saveProjectData(targetUserId, 'currentChat', { messages }, projectId)
+                .then(() => console.log("Chat Saved"))
+                .catch(e => console.error("Chat Save Failed", e));
+        }, 3000);
 
-                    const newTop = Math.min(90, Math.max(10, startTop + ((moveEvent.clientY - startY) / window.innerHeight) * 100));
-                    setHistoryButtonY(newTop);
+        return () => clearTimeout(timer);
+    }, [messages, user, projectId, targetUserId, isOwner, isReadOnly]);
+
+    // Auto save map
+    const handleAutoSaveMap = React.useCallback((mapData: { nodes: any[], edges: any[] }) => {
+        const { nodes, edges } = mapData;
+
+        // Safeguard: Do not save if empty (prevents overwriting good data with init state)
+        if (nodes.length === 0) {
+            console.log("Skipping save: Empty nodes");
+            return;
+        }
+
+        const data = JSON.stringify({ nodes, edges });
+        setMindMapCode(data);
+        if (user && projectId) {
+            console.log("Attempting AutoSave Map:", { isReadOnly, targetUserId, isOwner });
+
+            // Allow save if we are owner OR if public editing is allowed
+            const canSave = isOwner || (!isReadOnly && targetUserId);
+
+            if (canSave && targetUserId) {
+                saveProjectData(targetUserId, 'currentMap', { data }, projectId)
+                    .then(() => console.log("Map ProjectData Saved Successfully"))
+                    .catch(e => console.error("Map Save Failed", e));
+            } else {
+                console.warn("Save blocked", { isOwner, isReadOnly, targetUserId });
+            }
+        }
+
+        // Also save to 'maps' collection as history
+        if (user && projectId) {
+            const now = new Date();
+            const newId = currentMapId || now.getTime().toString();
+
+            const sanitizeForFirestore = (obj: any): any => {
+                try {
+                    return JSON.parse(JSON.stringify(obj, (key, value) => {
+                        if (typeof value === 'function') return undefined;
+                        if (key.startsWith('__')) return undefined;
+                        return value;
+                    }));
+                } catch (e) { return []; }
+            };
+
+            setSavedMaps(prev => {
+                const existing = prev.find(m => m.id === newId);
+                const title = existing?.title || t('map.default_title', { date: now.toLocaleDateString() });
+
+                const newMap = {
+                    id: newId,
+                    title,
+                    nodes: sanitizeForFirestore(nodes),
+                    edges: sanitizeForFirestore(edges),
+                    createdAt: existing?.createdAt || now.toISOString(),
+                    date: now.toISOString()
                 };
 
-                const handleMouseUp = () => {
-                    document.removeEventListener('mousemove', handleMouseMove);
-                    document.removeEventListener('mouseup', handleMouseUp);
+                const others = prev.filter(m => m.id !== newId);
+                const updated = [newMap, ...others];
 
-                    // Only toggle if it was a click (no significant movement)
-                    if (!hasMoved) {
-                        setHistoryOpen(!historyOpen);
-                    }
+                // Save inside the callback to ensure state is fresh
+                const canSave = isOwner || (!isReadOnly && targetUserId);
+                if (canSave && targetUserId) {
+                    saveDocument(targetUserId, 'maps', newMap, projectId)
+                        .then(() => console.log("History Map Saved"))
+                        .catch(e => console.error("History Save Failed", e));
+                }
+
+                return updated;
+            });
+
+            if (!currentMapId) setCurrentMapId(newId);
+        }
+    }, [user, projectId, isReadOnly, targetUserId, currentMapId]);
+
+    const handleAutoSaveChats = React.useCallback((chats: any) => {
+        // Safeguard: Do not save if empty object
+        if (!chats || Object.keys(chats).length === 0) return;
+
+        setActiveNodeChats(chats);
+        // Persist to project data
+        if (user && projectId) {
+            const now = new Date();
+            const newId = currentChatsId || now.getTime().toString();
+
+            setSavedChats(prev => {
+                const existing = prev.find(c => c.id === newId);
+                const title = existing?.title || t('chat.default_title', { date: now.toLocaleDateString() });
+
+                const newChats = {
+                    id: newId,
+                    title,
+                    chats,
+                    createdAt: existing?.createdAt || now.toISOString(),
+                    date: now.toISOString()
                 };
 
-                document.addEventListener('mousemove', handleMouseMove);
-                document.addEventListener('mouseup', handleMouseUp);
-            }}
-        >
-            <div className="bg-white dark:bg-neutral-800 border border-border/50 p-2 rounded-l-xl shadow-lg cursor-grab active:cursor-grabbing">
-                <div className="text-xs font-medium tracking-widest uppercase text-muted-foreground py-2 flex items-center gap-2 font-serif" style={{ writingMode: 'vertical-rl' }}>
-                    <span>{t('project.history')}</span>
-                </div>
+                const others = prev.filter(c => c.id !== newId);
+                const updated = [newChats, ...others];
+
+                if (!isReadOnly && targetUserId) saveDocument(targetUserId, 'chats', newChats, projectId);
+                return updated;
+            });
+
+            if (!currentChatsId) setCurrentChatsId(newId);
+        }
+    }, [user, projectId, isReadOnly, targetUserId, currentChatsId]);
+
+    // HISTORY HANDLERS
+    const onLoadDraft = (id: string) => {
+        const draft = savedDrafts.find(d => d.id === id);
+        if (draft) {
+            setPaperContent(draft.content);
+            setCurrentDraftId(draft.id);
+            setSidebarView('draft');
+            setHistoryOpen(false);
+        }
+    };
+
+    const onLoadMap = (id: string) => {
+        const map = savedMaps.find(m => m.id === id);
+        if (map) {
+            setMindMapCode(JSON.stringify({ nodes: map.nodes, edges: map.edges }));
+            setCurrentMapId(map.id);
+            setMapKey(Date.now().toString());
+            setSidebarView('map');
+            setHistoryOpen(false);
+        }
+    };
+
+    const onLoadChats = (id: string) => {
+        const history = savedChats.find(c => c.id === id);
+        if (history) {
+            setActiveNodeChats(history.chats);
+            setCurrentChatsId(history.id);
+            setSidebarView('map');
+            setHistoryOpen(false);
+        }
+    };
+
+    // Citation Normalizer Helper
+    const normalizeCitations = (content: string) => {
+        if (!content) return content;
+        // 1. Unescape escaped brackets if present: \[ID:1\] -> [ID:1]
+        let processed = content.replace(/\\\[ID:([\d\s,]+)\\\]/g, '[ID:$1]');
+        // 2. Convert [ID:x, y] -> [x, y]
+        processed = processed.replace(/\[ID:([\d\s,]+)\]/g, '[$1]');
+        return processed;
+    };
+
+    const onLoadManuscript = (id: any) => {
+        const m = savedManuscripts.find(d => d.id === id);
+        if (m) {
+            // Apply normalization on load
+            const cleanContent = normalizeCitations(m.content);
+            setMainContent(cleanContent);
+            setCurrentManuscriptId(m.id);
+            setSidebarView('main');
+            setHistoryOpen(false);
+        }
+    };
+
+    // Deletion Handlers
+    const onDeleteDraft = (id: string) => {
+        setSavedDrafts(prev => prev.filter(d => d.id !== id));
+        if (!isReadOnly && targetUserId) deleteDocument(targetUserId, 'drafts', id, projectId);
+        if (currentDraftId === id) {
+            setCurrentDraftId(null);
+            setPaperContent('');
+        }
+    };
+
+    const onDeleteMap = (id: string) => {
+        setSavedMaps(prev => prev.filter(m => m.id !== id));
+        if (!isReadOnly && targetUserId) deleteDocument(targetUserId, 'maps', id, projectId);
+        if (currentMapId === id) {
+            setCurrentMapId(null);
+            setMindMapCode(null);
+        }
+    };
+
+    const onDeleteChats = (id: string) => {
+        setSavedChats(prev => prev.filter(c => c.id !== id));
+        if (!isReadOnly && targetUserId) deleteDocument(targetUserId, 'chats', id, projectId);
+        if (currentChatsId === id) {
+            setCurrentChatsId(null);
+            setActiveNodeChats(null);
+        }
+    };
+
+    const onDeleteManuscript = (id: string) => {
+        if (!isReadOnly && targetUserId) deleteDocument(targetUserId, 'manuscripts', id, projectId);
+        setSavedManuscripts(prev => prev.filter(m => m.id !== id));
+        if (currentManuscriptId === id) {
+            setCurrentManuscriptId(null);
+            setMainContent('');
+        }
+    };
+
+    // Research Handlers
+    const handleSaveResearch = (results: any[]) => {
+        if (!user || !projectId) return;
+        const now = new Date();
+        const newId = currentResearchId || now.getTime().toString();
+        const title = t('research.default_title', { date: now.toLocaleDateString(), count: results.length });
+
+        setSavedResearch(prev => {
+            const item = {
+                id: newId,
+                title,
+                results,
+                createdAt: now.toISOString(),
+                date: now.toISOString()
+            };
+            const others = prev.filter(r => r.id !== newId);
+            const updated = [item, ...others];
+            if (!isReadOnly && targetUserId) saveDocument(targetUserId, 'research', item, projectId);
+            if (!currentResearchId) setCurrentResearchId(newId);
+            return updated;
+        });
+    };
+
+    const onLoadResearch = (id: string) => {
+        const item = savedResearch.find(r => r.id === id);
+        if (item) {
+            setCurrentResearchResults(item.results);
+            setCurrentResearchId(item.id);
+            setSidebarView('research');
+            setHistoryOpen(false);
+        }
+    };
+
+    const onDeleteResearch = (id: string) => {
+        setSavedResearch(prev => prev.filter(r => r.id !== id));
+        if (!isReadOnly && targetUserId) deleteDocument(targetUserId, 'research', id, projectId);
+        if (currentResearchId === id) {
+            setCurrentResearchId(null);
+            setCurrentResearchResults([]);
+        }
+    };
+
+
+    if (loading || !user) {
+        return (
+            <div className="h-screen flex items-center justify-center bg-background" suppressHydrationWarning={true}>
+                <Loader2 className="animate-spin text-blue-500" size={32} />
             </div>
-        </div>
+        );
+    }
 
+    return (
+        <div suppressHydrationWarning className="flex h-screen overflow-hidden bg-background text-foreground transition-colors duration-500 relative">
+            {/* Back to Previous Page Button */}
+            <button
+                onClick={() => {
+                    const fromPath = searchParams.get('from');
+                    router.push(fromPath || '/dashboard');
+                }}
+                className="fixed top-4 left-4 z-[60] p-2 bg-white/50 dark:bg-black/50 backdrop-blur rounded-full hover:bg-white dark:hover:bg-black transition-all shadow-sm border border-border/50"
+                title={t('common.back')}
+            >
+                <ArrowLeft size={20} />
+            </button>
 
-        {/* Search / Chat Area */}
-        <div className={`flex-1 flex flex-col transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${sidebarView !== 'none' ? `mr-[${sidebarWidth}%]` : ''} relative z-10`} style={sidebarView !== 'none' ? { marginRight: `${sidebarWidth}%` } : {}} onClick={() => sidebarView !== 'none' && setSidebarView(sidebarView)}>
+            {/* History Sidebar */}
+            <HistorySidebar
+                isOpen={historyOpen}
+                onClose={() => setHistoryOpen(false)}
+                savedDrafts={savedDrafts}
+                savedMaps={savedMaps}
+                savedChats={savedChats}
+                savedManuscripts={savedManuscripts}
+                onLoadDraft={onLoadDraft}
+                onLoadMap={onLoadMap}
+                onLoadChats={onLoadChats}
+                onLoadManuscript={onLoadManuscript}
+                onDeleteDraft={onDeleteDraft}
+                onDeleteMap={onDeleteMap}
+                onDeleteChats={onDeleteChats}
+                onDeleteManuscript={onDeleteManuscript}
+                savedResearch={savedResearch}
+                onLoadResearch={onLoadResearch}
+                onDeleteResearch={onDeleteResearch}
+                onRename={handleRename}
+                onNewDraft={handleNewDraft}
+                onNewManuscript={handleNewManuscript}
+            />
 
-            {/* Minimal Header with Glass Effect */}
-            <header className="absolute top-0 left-0 right-0 h-20 px-8 flex justify-between items-center z-20 bg-white/70 dark:bg-black/70 backdrop-blur-xl border-b border-black/5 dark:border-white/5 transition-all duration-300 pl-16">
-                {/* Added pl-16 to avoid overlap with back button */}
-                <div className="flex items-center space-x-3">
-                    {projectDetails ? (
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${getColorClasses(projectDetails.color || 'blue').bg} ${getColorClasses(projectDetails.color || 'blue').text}`}>
-                            {React.createElement(getIconComponent(projectDetails.icon || 'Folder'), { size: 20 })}
-                        </div>
-                    ) : (
-                        <div className="w-10 h-10 rounded-xl bg-neutral-200 dark:bg-neutral-800 animate-pulse" />
-                    )}
-                    <div onClick={() => router.push('/dashboard')} className="flex flex-col cursor-pointer hover:opacity-80 transition-opacity">
-                        {/* Hidden on mobile if sidebar logic requires, but generally we want to show it. */}
-                        {/* Reverting hidden logic to simple responsive if needed, or keeping as user had it. */}
-                        {/* User requested simple logo replacement, let's keep text simple. */}
-                        <span className="font-medium tracking-tight mr-4 font-serif hidden md:block">Venalium</span>
-                        {projectDetails ? (
-                            <span className="text-xs text-muted-foreground">{projectDetails.name}</span>
-                        ) : (
-                            <div className="h-3 w-20 bg-neutral-200 dark:bg-neutral-800 animate-pulse rounded mt-1" />
-                        )}
-                    </div>
-
-                    {/* User Profile - Client Side Only to prevent hydration mismatch */}
-                    {mounted && user && (
-                        <div className="flex items-center gap-3 pl-4 border-l border-neutral-200 dark:border-neutral-800">
-                            {user.photoURL ? (
-                                <img
-                                    src={user.photoURL}
-                                    alt="User"
-                                    className="w-8 h-8 rounded-full border border-neutral-200 dark:border-neutral-700"
-                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                />
-                            ) : (
-                                <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold">
-                                    {(user.email || 'U')[0].toUpperCase()}
-                                </div>
-                            )}
-                            <div className={`hidden md:flex flex-col ${sidebarView !== 'none' ? 'hidden' : ''}`}>
-                                <span className="text-xs font-medium max-w-[100px] truncate">{user.displayName || 'User'}</span>
-                                <button onClick={() => signOut()} className="text-[10px] text-muted-foreground hover:text-red-500 text-left transition-colors">
-                                    {t('common.sign_out')}
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                <div className="flex items-center gap-2 bg-neutral-100 dark:bg-neutral-800 p-1 rounded-full border border-black/5 dark:border-white/5">
-                    <button
-                        onClick={(e) => { e.stopPropagation(); setSidebarView(sidebarView === 'draft' ? 'none' : 'draft'); }}
-                        className={`flex items-center gap-2 px-3 lg:px-4 py-1.5 rounded-full transition-all duration-300 text-sm font-medium ${sidebarView === 'draft' ? 'bg-white dark:bg-black shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-                        title={t('project.tabs.draft')}
-                    >
-                        <FileText size={14} /> <span className={sidebarView !== 'none' ? 'hidden' : 'hidden sm:inline'}>{t('project.tabs.draft')}</span>
-                    </button>
-                    <button
-                        onClick={(e) => { e.stopPropagation(); setSidebarView(sidebarView === 'map' ? 'none' : 'map'); }}
-                        className={`flex items-center gap-2 px-3 lg:px-4 py-1.5 rounded-full transition-all duration-300 text-sm font-medium ${sidebarView === 'map' ? 'bg-white dark:bg-black shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-                        title={t('project.tabs.map')}
-                    >
-                        <MapIcon size={14} /> <span className={sidebarView !== 'none' ? 'hidden' : 'hidden sm:inline'}>{t('project.tabs.map')}</span>
-                    </button>
-                    <button
-                        onClick={(e) => { e.stopPropagation(); setSidebarView(sidebarView === 'main' ? 'none' : 'main'); }}
-                        className={`flex items-center gap-2 px-3 lg:px-4 py-1.5 rounded-full transition-all duration-300 text-sm font-medium ${sidebarView === 'main' ? 'bg-white dark:bg-black shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-                        title={t('project.tabs.manuscript')}
-                    >
-                        <BookOpen size={14} /> <span className={sidebarView !== 'none' ? 'hidden' : 'hidden sm:inline'}>{t('project.tabs.manuscript')}</span>
-                    </button>
-                    <button
-                        onClick={(e) => { e.stopPropagation(); setSidebarView(sidebarView === 'research' ? 'none' : 'research'); }}
-                        className={`flex items-center gap-2 px-3 lg:px-4 py-1.5 rounded-full transition-all duration-300 text-sm font-medium ${sidebarView === 'research' ? 'bg-white dark:bg-black shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-                        title={t('project.tabs.research')}
-                    >
-                        <SearchIcon size={14} /> <span className={sidebarView !== 'none' ? 'hidden' : 'hidden sm:inline'}>{t('project.tabs.research')}</span>
-                    </button>
-                </div>
-            </header>
-
-            {/* Dynamic Content */}
-            <main className="flex-1 flex flex-col overflow-y-auto w-full max-w-3xl mx-auto pt-24 px-6 pb-0 scrollbar-hide">
-                {/* Dynamic Greeting */}
-                {messages.length === 0 && (
-                    <div className="min-h-[40vh] flex flex-col justify-end pb-8 animate-fade-in">
-                        <h1 className="text-5xl md:text-6xl font-serif font-light tracking-tight mb-4 leading-[1.1] animate-fade-in-up">
-                            {t('project.greeting.what_shall_we')} <br />
-                            <span className="italic text-muted-foreground animate-fade-in-up-delay">{t('project.greeting.research_today')}</span>
-                        </h1>
-                        <p className="text-lg text-muted-foreground font-light max-w-md">
-                            {projectDetails ? t('project.greeting.project_name', { name: projectDetails.name }) : ''}
-                            {t('project.greeting.description')}
-                        </p>
-                    </div>
-                )}
-
-                {/* Chat Interface */}
-                <div className="flex-1 min-h-0 flex flex-col relative">
-                    <ChatInterface
-                        messages={messages}
-                        onSendMessage={handleSendMessage}
-                        isLoading={isLoading}
-                        loadingStatus={loadingStatus}
-                        researchGroups={researchGroups}
-                        currentGroupId={currentGroupId}
-                        articles={latestSearchResults}
-                        onConfirmSearch={(config) => executeLiteratureSearch(config)}
-                        onStopGeneration={handleStopGeneration}
-                        onCancelSearch={(config, chatOnly) => {
-                            setIsLoading(false);
-                            setLoadingStatus('');
-                            if (chatOnly && config?.originalMessage) {
-                                // Fallback to normal chat response
-                                // Filter out any confirmation widgets from history
-                                const cleanHistory = messages.filter(m => m.type !== 'search-confirmation');
-                                setIsLoading(true);
-
-                                if (abortControllerRef.current) abortControllerRef.current.abort();
-                                abortControllerRef.current = new AbortController();
-
-                                processChatResponse(config.originalMessage, '', cleanHistory);
-                            }
-                        }}
-                    />
-                </div>
-            </main>
-
-            {/* Dark Mode Toggle */}
-            {mounted && (
-                <button
-                    onClick={(e) => { e.stopPropagation(); setTheme(theme === 'dark' ? 'light' : 'dark'); }}
-                    className="absolute bottom-6 left-6 p-3 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-muted-foreground hover:text-foreground hover:bg-white/20 transition-all z-20"
-                >
-                    {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-                </button>
-            )}
-        </div>
-
-        {/* Sidebar Container - Resizable */}
-        <div
-            style={{ width: `${sidebarWidth}%` }}
-            className={`fixed inset-y-0 right-0 bg-background border-l border-border/50 shadow-2xl z-30 transform transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] glass-panel ${sidebarView !== 'none' ? 'translate-x-0' : 'translate-x-full'} ${isResizing ? 'transition-none' : ''}`}
-        >
-            {/* Resize Handle */}
+            {/* Toggle History Button - Draggable */}
             <div
-                className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-blue-500/30 active:bg-blue-500/50 transition-colors z-50 group"
+                className={`fixed right-0 z-[55] transform transition-transform duration-300 ${historyOpen ? 'translate-x-full' : 'translate-x-0'}`}
+                style={{ top: `${historyButtonY}%` }}
                 onMouseDown={(e) => {
                     e.preventDefault();
-                    setIsResizing(true);
-                    const startX = e.clientX;
-                    const startWidth = sidebarWidth;
+                    const startY = e.clientY;
+                    const startTop = historyButtonY;
+                    let hasMoved = false;
+
                     const handleMouseMove = (moveEvent: MouseEvent) => {
-                        const delta = startX - moveEvent.clientX;
-                        const newWidth = Math.min(80, Math.max(25, startWidth + (delta / window.innerWidth) * 100));
-                        setSidebarWidth(newWidth);
+                        const deltaY = Math.abs(moveEvent.clientY - startY);
+                        if (deltaY > 5) hasMoved = true; // Threshold for drag detection
+
+                        const newTop = Math.min(90, Math.max(10, startTop + ((moveEvent.clientY - startY) / window.innerHeight) * 100));
+                        setHistoryButtonY(newTop);
                     };
+
                     const handleMouseUp = () => {
-                        setIsResizing(false);
                         document.removeEventListener('mousemove', handleMouseMove);
                         document.removeEventListener('mouseup', handleMouseUp);
+
+                        // Only toggle if it was a click (no significant movement)
+                        if (!hasMoved) {
+                            setHistoryOpen(!historyOpen);
+                        }
                     };
+
                     document.addEventListener('mousemove', handleMouseMove);
                     document.addEventListener('mouseup', handleMouseUp);
                 }}
             >
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-12 bg-neutral-300 dark:bg-neutral-600 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="bg-white dark:bg-neutral-800 border border-border/50 p-2 rounded-l-xl shadow-lg cursor-grab active:cursor-grabbing">
+                    <div className="text-xs font-medium tracking-widest uppercase text-muted-foreground py-2 flex items-center gap-2 font-serif" style={{ writingMode: 'vertical-rl' }}>
+                        <span>{t('project.history')}</span>
+                    </div>
+                </div>
             </div>
-            {sidebarView === 'draft' && (
-                <PaperWriter
-                    content={paperContent}
-                    setContent={setPaperContent}
-                    onAskAI={async (task: string, prompt: string) => handleAskAI(task, prompt)}
-                    isAutoSyncEnabled={isAutoSyncEnabled}
-                    setIsAutoSyncEnabled={setIsAutoSyncEnabled}
-                    isUpdating={isDraftUpdating}
-                />
-            )}
 
-            {sidebarView === 'map' && (
-                <SystemMapPanel
-                    mindMapData={parsedMindMapData}
-                    onSave={handleAutoSaveMap}
-                    initialNodeChats={activeNodeChats}
-                    onSaveChats={handleAutoSaveChats}
-                    availableGroups={researchGroups}
-                    mapKey={mapKey}
-                />
-            )}
 
-            {sidebarView === 'main' && (
-                <PaperProvider value={{ papers: researchGroups.flatMap(g => g.papers || []) }}>
-                    <MainEditor
-                        content={mainContent}
-                        setContent={setMainContent}
-                        saveStatus={saveStatus}
-                    />
-                </PaperProvider>
-            )}
+            {/* Search / Chat Area */}
+            <div className={`flex-1 flex flex-col transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${sidebarView !== 'none' ? `mr-[${sidebarWidth}%]` : ''} relative z-10`} style={sidebarView !== 'none' ? { marginRight: `${sidebarWidth}%` } : {}} onClick={() => sidebarView !== 'none' && setSidebarView(sidebarView)}>
 
-            {sidebarView === 'research' && (
-                <ResearchPanel
-                    key={currentGroupId || currentResearchId || 'new'}
-                    onClose={() => setSidebarView('none')}
-                    initialResults={currentResearchResults}
-                    onSave={handleSaveResearch}
-                    groups={researchGroups}
-                    currentGroupId={currentGroupId}
-                    onGroupChange={handleGroupChange}
-                    onCreateGroup={handleCreateGroup}
-                    onRenameGroup={handleRenameGroup}
-                    onDeleteGroup={handleDeleteGroup}
-                    onAutoSave={handleGroupAutoSave}
-                    onMovePapers={handleMovePapers}
-                    projectName={projectDetails?.name}
-                />
-            )}
+                {/* Minimal Header with Glass Effect */}
+                <header className="absolute top-0 left-0 right-0 h-20 px-8 flex justify-between items-center z-20 bg-white/70 dark:bg-black/70 backdrop-blur-xl border-b border-black/5 dark:border-white/5 transition-all duration-300 pl-16">
+                    {/* Added pl-16 to avoid overlap with back button */}
+                    <div className="flex items-center space-x-3">
+                        {projectDetails ? (
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${getColorClasses(projectDetails.color || 'blue').bg} ${getColorClasses(projectDetails.color || 'blue').text}`}>
+                                {React.createElement(getIconComponent(projectDetails.icon || 'Folder'), { size: 20 })}
+                            </div>
+                        ) : (
+                            <div className="w-10 h-10 rounded-xl bg-neutral-200 dark:bg-neutral-800 animate-pulse" />
+                        )}
+                        <div onClick={() => router.push('/dashboard')} className="flex flex-col cursor-pointer hover:opacity-80 transition-opacity">
+                            {/* Hidden on mobile if sidebar logic requires, but generally we want to show it. */}
+                            {/* Reverting hidden logic to simple responsive if needed, or keeping as user had it. */}
+                            {/* User requested simple logo replacement, let's keep text simple. */}
+                            <span className="font-medium tracking-tight mr-4 font-serif hidden md:block">Venalium</span>
+                            {projectDetails ? (
+                                <span className="text-xs text-muted-foreground">{projectDetails.name}</span>
+                            ) : (
+                                <div className="h-3 w-20 bg-neutral-200 dark:bg-neutral-800 animate-pulse rounded mt-1" />
+                            )}
+                        </div>
 
-            {/* Close Button specifically for mobile or convenience */}
-            {sidebarView !== 'none' && (
-                <button
-                    onClick={() => setSidebarView('none')}
-                    className="absolute top-6 right-6 p-2 text-muted-foreground hover:text-foreground z-50 md:hidden"
+                        {/* User Profile - Client Side Only to prevent hydration mismatch */}
+                        {mounted && user && (
+                            <div className="flex items-center gap-3 pl-4 border-l border-neutral-200 dark:border-neutral-800">
+                                {user.photoURL ? (
+                                    <img
+                                        src={user.photoURL}
+                                        alt="User"
+                                        className="w-8 h-8 rounded-full border border-neutral-200 dark:border-neutral-700"
+                                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                    />
+                                ) : (
+                                    <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold">
+                                        {(user.email || 'U')[0].toUpperCase()}
+                                    </div>
+                                )}
+                                <div className={`hidden md:flex flex-col ${sidebarView !== 'none' ? 'hidden' : ''}`}>
+                                    <span className="text-xs font-medium max-w-[100px] truncate">{user.displayName || 'User'}</span>
+                                    <button onClick={() => signOut()} className="text-[10px] text-muted-foreground hover:text-red-500 text-left transition-colors">
+                                        {t('common.sign_out')}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex items-center gap-2 bg-neutral-100 dark:bg-neutral-800 p-1 rounded-full border border-black/5 dark:border-white/5">
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setSidebarView(sidebarView === 'draft' ? 'none' : 'draft'); }}
+                            className={`flex items-center gap-2 px-3 lg:px-4 py-1.5 rounded-full transition-all duration-300 text-sm font-medium ${sidebarView === 'draft' ? 'bg-white dark:bg-black shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                            title={t('project.tabs.draft')}
+                        >
+                            <FileText size={14} /> <span className={sidebarView !== 'none' ? 'hidden' : 'hidden sm:inline'}>{t('project.tabs.draft')}</span>
+                        </button>
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setSidebarView(sidebarView === 'map' ? 'none' : 'map'); }}
+                            className={`flex items-center gap-2 px-3 lg:px-4 py-1.5 rounded-full transition-all duration-300 text-sm font-medium ${sidebarView === 'map' ? 'bg-white dark:bg-black shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                            title={t('project.tabs.map')}
+                        >
+                            <MapIcon size={14} /> <span className={sidebarView !== 'none' ? 'hidden' : 'hidden sm:inline'}>{t('project.tabs.map')}</span>
+                        </button>
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setSidebarView(sidebarView === 'main' ? 'none' : 'main'); }}
+                            className={`flex items-center gap-2 px-3 lg:px-4 py-1.5 rounded-full transition-all duration-300 text-sm font-medium ${sidebarView === 'main' ? 'bg-white dark:bg-black shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                            title={t('project.tabs.manuscript')}
+                        >
+                            <BookOpen size={14} /> <span className={sidebarView !== 'none' ? 'hidden' : 'hidden sm:inline'}>{t('project.tabs.manuscript')}</span>
+                        </button>
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setSidebarView(sidebarView === 'research' ? 'none' : 'research'); }}
+                            className={`flex items-center gap-2 px-3 lg:px-4 py-1.5 rounded-full transition-all duration-300 text-sm font-medium ${sidebarView === 'research' ? 'bg-white dark:bg-black shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                            title={t('project.tabs.research')}
+                        >
+                            <SearchIcon size={14} /> <span className={sidebarView !== 'none' ? 'hidden' : 'hidden sm:inline'}>{t('project.tabs.research')}</span>
+                        </button>
+                    </div>
+                </header>
+
+                {/* Dynamic Content */}
+                <main className="flex-1 flex flex-col overflow-y-auto w-full max-w-3xl mx-auto pt-24 px-6 pb-0 scrollbar-hide">
+                    {/* Dynamic Greeting */}
+                    {messages.length === 0 && (
+                        <div className="min-h-[40vh] flex flex-col justify-end pb-8 animate-fade-in">
+                            <h1 className="text-5xl md:text-6xl font-serif font-light tracking-tight mb-4 leading-[1.1] animate-fade-in-up">
+                                {t('project.greeting.what_shall_we')} <br />
+                                <span className="italic text-muted-foreground animate-fade-in-up-delay">{t('project.greeting.research_today')}</span>
+                            </h1>
+                            <p className="text-lg text-muted-foreground font-light max-w-md">
+                                {projectDetails ? t('project.greeting.project_name', { name: projectDetails.name }) : ''}
+                                {t('project.greeting.description')}
+                            </p>
+                        </div>
+                    )}
+
+                    {/* Chat Interface */}
+                    <div className="flex-1 min-h-0 flex flex-col relative">
+                        <ChatInterface
+                            messages={messages}
+                            onSendMessage={handleSendMessage}
+                            isLoading={isLoading}
+                            loadingStatus={loadingStatus}
+                            researchGroups={researchGroups}
+                            currentGroupId={currentGroupId}
+                            articles={latestSearchResults}
+                            onConfirmSearch={(config) => executeLiteratureSearch(config)}
+                            onStopGeneration={handleStopGeneration}
+                            onCancelSearch={(config, chatOnly) => {
+                                setIsLoading(false);
+                                setLoadingStatus('');
+                                if (chatOnly && config?.originalMessage) {
+                                    // Fallback to normal chat response
+                                    // Filter out any confirmation widgets from history
+                                    const cleanHistory = messages.filter(m => m.type !== 'search-confirmation');
+                                    setIsLoading(true);
+
+                                    if (abortControllerRef.current) abortControllerRef.current.abort();
+                                    abortControllerRef.current = new AbortController();
+
+                                    processChatResponse(config.originalMessage, '', cleanHistory);
+                                }
+                            }}
+                        />
+                    </div>
+                </main>
+
+                {/* Dark Mode Toggle */}
+                {mounted && (
+                    <button
+                        onClick={(e) => { e.stopPropagation(); setTheme(theme === 'dark' ? 'light' : 'dark'); }}
+                        className="absolute bottom-6 left-6 p-3 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-muted-foreground hover:text-foreground hover:bg-white/20 transition-all z-20"
+                    >
+                        {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+                    </button>
+                )}
+            </div>
+
+            {/* Sidebar Container - Resizable */}
+            <div
+                style={{ width: `${sidebarWidth}%` }}
+                className={`fixed inset-y-0 right-0 bg-background border-l border-border/50 shadow-2xl z-30 transform transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] glass-panel ${sidebarView !== 'none' ? 'translate-x-0' : 'translate-x-full'} ${isResizing ? 'transition-none' : ''}`}
+            >
+                {/* Resize Handle */}
+                <div
+                    className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-blue-500/30 active:bg-blue-500/50 transition-colors z-50 group"
+                    onMouseDown={(e) => {
+                        e.preventDefault();
+                        setIsResizing(true);
+                        const startX = e.clientX;
+                        const startWidth = sidebarWidth;
+                        const handleMouseMove = (moveEvent: MouseEvent) => {
+                            const delta = startX - moveEvent.clientX;
+                            const newWidth = Math.min(80, Math.max(25, startWidth + (delta / window.innerWidth) * 100));
+                            setSidebarWidth(newWidth);
+                        };
+                        const handleMouseUp = () => {
+                            setIsResizing(false);
+                            document.removeEventListener('mousemove', handleMouseMove);
+                            document.removeEventListener('mouseup', handleMouseUp);
+                        };
+                        document.addEventListener('mousemove', handleMouseMove);
+                        document.addEventListener('mouseup', handleMouseUp);
+                    }}
                 >
-                    <X size={20} />
-                </button>
-            )}
-        </div>
+                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-12 bg-neutral-300 dark:bg-neutral-600 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
+                {sidebarView === 'draft' && (
+                    <PaperWriter
+                        content={paperContent}
+                        setContent={setPaperContent}
+                        onAskAI={async (task: string, prompt: string) => handleAskAI(task, prompt)}
+                        isAutoSyncEnabled={isAutoSyncEnabled}
+                        setIsAutoSyncEnabled={setIsAutoSyncEnabled}
+                        isUpdating={isDraftUpdating}
+                    />
+                )}
 
-    </div>
-);
+                {sidebarView === 'map' && (
+                    <SystemMapPanel
+                        mindMapData={parsedMindMapData}
+                        onSave={handleAutoSaveMap}
+                        initialNodeChats={activeNodeChats}
+                        onSaveChats={handleAutoSaveChats}
+                        availableGroups={researchGroups}
+                        mapKey={mapKey}
+                    />
+                )}
+
+                {sidebarView === 'main' && (
+                    <PaperProvider value={{ papers: researchGroups.flatMap(g => g.papers || []) }}>
+                        <MainEditor
+                            content={mainContent}
+                            setContent={setMainContent}
+                            saveStatus={saveStatus}
+                        />
+                    </PaperProvider>
+                )}
+
+                {sidebarView === 'research' && (
+                    <ResearchPanel
+                        key={currentGroupId || currentResearchId || 'new'}
+                        onClose={() => setSidebarView('none')}
+                        initialResults={currentResearchResults}
+                        onSave={handleSaveResearch}
+                        groups={researchGroups}
+                        currentGroupId={currentGroupId}
+                        onGroupChange={handleGroupChange}
+                        onCreateGroup={handleCreateGroup}
+                        onRenameGroup={handleRenameGroup}
+                        onDeleteGroup={handleDeleteGroup}
+                        onAutoSave={handleGroupAutoSave}
+                        onMovePapers={handleMovePapers}
+                        projectName={projectDetails?.name}
+                    />
+                )}
+
+                {/* Close Button specifically for mobile or convenience */}
+                {sidebarView !== 'none' && (
+                    <button
+                        onClick={() => setSidebarView('none')}
+                        className="absolute top-6 right-6 p-2 text-muted-foreground hover:text-foreground z-50 md:hidden"
+                    >
+                        <X size={20} />
+                    </button>
+                )}
+            </div>
+
+        </div>
+    );
 }
 
