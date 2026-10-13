@@ -1,0 +1,680 @@
+<title>CMOS 製程 3D 逐步動畫</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: 3D wafer stage fills the left, a "run card" panel (like a fab lot traveler) on the right; stacks on phones.
+   Single dark look on purpose: the scene reads like an inspection microscope; amber = cleanroom yellow light. */
+:root {
+  color-scheme: dark;
+  --bg: #0e1216;
+  --stage: #121820;
+  --panel: #161c23;
+  --line: #273039;
+  --fg: #e6e9ec;
+  --muted: #94a0ab;
+  --amber: #f2b33d;
+  --amber-dim: #6b5323;
+  --font-display: "Noto Serif TC", "Songti TC", serif;
+  --font-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 14px; overflow: hidden; }
+.app { display: grid; grid-template-columns: minmax(0, 1fr) 380px; height: 100%; }
+.stage { position: relative; background: radial-gradient(ellipse at 50% 40%, #18212b 0%, var(--stage) 70%); min-width: 0; overflow: hidden; }
+#gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+.labels { position: absolute; inset: 0; pointer-events: none; }
+.lbl { position: absolute; transform: translate(-50%, -100%); font-size: 12px; padding: 2px 7px; border-radius: 3px;
+  background: rgba(14,18,22,.78); border: 1px solid var(--line); white-space: nowrap; color: var(--fg); transition: opacity .25s; }
+.lbl::after { content: ""; position: absolute; left: 50%; top: 100%; width: 1px; height: 10px; background: var(--muted); }
+.hud { position: absolute; left: 16px; top: 14px; display: flex; flex-direction: column; gap: 2px; pointer-events: none; }
+.hud .code { font-family: var(--font-mono); font-size: 12px; color: var(--amber); letter-spacing: .08em; }
+.hud .name { font-family: var(--font-display); font-size: clamp(20px, 3vw, 30px); font-weight: 700; text-wrap: balance; }
+.hud .phase { color: var(--muted); font-size: 13px; }
+.tools { position: absolute; right: 14px; top: 14px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.chip { font: 12px var(--font-body); color: var(--muted); background: rgba(22,28,35,.85); border: 1px solid var(--line); border-radius: 999px; padding: 5px 11px; cursor: pointer; }
+.chip[aria-pressed="true"] { color: var(--bg); background: var(--amber); border-color: var(--amber); }
+.chip:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+.controls { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  display: flex; align-items: center; gap: 10px; background: linear-gradient(transparent, rgba(14,18,22,.92) 40%); }
+.controls button { font: 500 13px var(--font-body); color: var(--fg); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; height: 34px; min-width: 38px; padding: 0 10px; cursor: pointer; }
+.controls button.play { background: var(--amber); color: #1b1406; border-color: var(--amber); min-width: 72px; }
+.controls input[type=range] { flex: 1; min-width: 60px; accent-color: var(--amber); }
+.controls select { font: 12px var(--font-body); background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; height: 34px; }
+.tick { font-family: var(--font-mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 46px; text-align: right; }
+
+.panel { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding-block: 18px 28px; padding-inline: 20px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.panel h1 { font-family: var(--font-display); font-size: 19px; margin: 0; }
+.panel .sub { color: var(--muted); font-size: 12px; margin-top: 4px; line-height: 1.5; }
+.card { display: flex; flex-direction: column; gap: 10px; }
+.meta { display: flex; gap: 8px; flex-wrap: wrap; }
+.tag { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; padding: 3px 8px; border-radius: 3px; border: 1px solid var(--amber-dim); color: var(--amber); }
+.tag.plain { border-color: var(--line); color: var(--muted); }
+.card h2 { font-size: 17px; margin: 0; font-weight: 700; }
+.card .en { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.why { line-height: 1.7; color: var(--fg); margin: 0; }
+.why b { color: var(--amber); font-weight: 500; }
+.phases { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; counter-reset: ph; }
+.phases li { position: relative; padding: 6px 8px 6px 30px; border-radius: 4px; color: var(--muted); line-height: 1.5; font-size: 13px; }
+.phases li::before { counter-increment: ph; content: counter(ph); position: absolute; left: 8px; top: 6px; font-family: var(--font-mono); font-size: 11px; }
+.phases li.done { color: var(--fg); }
+.phases li.now { color: var(--fg); background: rgba(242,179,61,.1); box-shadow: inset 2px 0 0 var(--amber); }
+.note { font-size: 12.5px; line-height: 1.6; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 10px; }
+.note b { color: var(--fg); font-weight: 500; }
+.sect { font-size: 11px; letter-spacing: .12em; color: var(--muted); text-transform: uppercase; font-family: var(--font-mono); }
+.legend { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 12px; }
+.legend div { display: flex; align-items: center; gap: 7px; font-size: 12px; transition: opacity .3s; min-width: 0; }
+.legend i { width: 12px; height: 12px; border-radius: 2px; flex: none; border: 1px solid rgba(255,255,255,.15); }
+.legend div.off { opacity: .28; }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.steps button { all: unset; box-sizing: border-box; width: 100%; display: grid; grid-template-columns: 30px 1fr auto; gap: 8px; align-items: baseline;
+  padding: 6px 8px; border-radius: 4px; cursor: pointer; color: var(--muted); font-size: 13px; }
+.steps button:hover { background: rgba(255,255,255,.04); }
+.steps button.cur { color: var(--fg); background: rgba(242,179,61,.1); }
+.steps button:focus-visible { outline: 2px solid var(--amber); }
+.steps .n { font-family: var(--font-mono); font-size: 11px; }
+.steps .m { font-family: var(--font-mono); font-size: 10.5px; color: var(--amber-dim); }
+.steps button.cur .m { color: var(--amber); }
+.fallback { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--muted); }
+
+@media (max-width: 860px) {
+  body { overflow: auto; }
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: 58vh auto; height: auto; }
+  .stage { height: 58vh; }
+  .panel { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+  .hud .phase { display: none; }
+  .tools { top: auto; bottom: 64px; right: 10px; }
+}
+@media (prefers-reduced-motion: reduce) { .lbl { transition: none; } }
+</style>
+
+<div class="app">
+  <section class="stage" aria-label="3D 製程模型">
+    <canvas id="gl"></canvas>
+    <div class="labels" id="labels"></div>
+    <div class="hud" aria-live="polite">
+      <span class="code" id="hudCode">STEP 00</span>
+      <span class="name" id="hudName">起始晶圓</span>
+      <span class="phase" id="hudPhase"></span>
+    </div>
+    <div class="tools">
+      <button class="chip" id="tPause" aria-pressed="true">每步暫停</button>
+      <button class="chip" id="tDiel" aria-pressed="false">隱藏介電層</button>
+      <button class="chip" id="tLabels" aria-pressed="true">標籤</button>
+      <button class="chip" id="tRotate" aria-pressed="false">自動旋轉</button>
+      <button class="chip" id="tReset">重設視角</button>
+    </div>
+    <div class="controls">
+      <button id="bPrev" aria-label="上一步">◀</button>
+      <button id="bPlay" class="play">▶ 播放</button>
+      <button id="bNext" aria-label="下一步">▶</button>
+      <input id="scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="製程進度">
+      <span class="tick" id="tick">0/15</span>
+      <select id="speed" aria-label="播放速度">
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+      </select>
+    </div>
+  </section>
+
+  <aside class="panel">
+    <div>
+      <h1>平面 CMOS 製程：從晶圓到焊墊</h1>
+      <div class="sub">依 SMT_07 PlanarFET Process 的流程，一個反相器（左 PMOS、右 NMOS）逐層長出來。拖曳旋轉、滾輪縮放；空白鍵播放，← → 換步驟。</div>
+    </div>
+
+    <div class="card">
+      <div class="meta"><span class="tag" id="cMask">光罩 —</span><span class="tag plain" id="cZone">區域</span></div>
+      <h2 id="cTitle"></h2>
+      <div class="en" id="cEn"></div>
+      <p class="why" id="cWhy"></p>
+      <ol class="phases" id="cPhases"></ol>
+      <div class="note" id="cNote"></div>
+    </div>
+
+    <div>
+      <div class="sect">材料圖例</div>
+      <div class="legend" id="legend" style="margin-top:8px"></div>
+    </div>
+
+    <div>
+      <div class="sect">製程步驟</div>
+      <ol class="steps" id="stepList" style="margin-top:6px"></ol>
+    </div>
+  </aside>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function () {
+"use strict";
+
+/* ---------- step content (from SMT_07 notes + 10/05, 10/12 lectures) ---------- */
+const STEPS = [
+  { code: "00", title: "起始晶圓", en: "P⁺ substrate + P⁻ epitaxial layer", mask: "—", zone: "長晶／磊晶",
+    why: "200 mm <b>P⁺ 重摻雜基板</b>上長一層約 5 µm 的 <b>P⁻ 磊晶層</b>。磊晶延續基板晶格、沒有 CZ 晶棒的氧碳雜質；P⁺ 基板電阻低，可以<b>抑制 Latch-up</b>。",
+    phases: [[0, "P⁺ 基板（低電阻）"], [0.3, "磊晶成長 P⁻ 層 ~5 µm（900–1200 °C）"]],
+    note: "<b>考點：</b>磊晶＝在單晶基板上延續晶格長單晶薄膜；溫度不夠會變多晶或非晶。" },
+  { code: "01", title: "雙井", en: "Twin-well implants", mask: "#1 #2", zone: "熱製程・微影・佈植",
+    why: "先定義 <b>N-well（放 PMOS）</b>與 <b>P-well（放 NMOS）</b>。雙井可以分別調濃度，讓兩種電晶體的 Vth 對稱（±0.5 V），也比單井更能抑制 Latch-up。",
+    phases: [[0, "熱氧化屏蔽層 10–20 nm（防污染、防通道效應、保護表面）"], [0.08, "微影：光阻蓋住 NMOS 區"], [0.15, "佈植 P → N-well"], [0.45, "去光阻；換光罩蓋住 PMOS 區"], [0.55, "佈植 B → P-well"], [0.85, "退火（修復晶格＋活化雜質）；DHF 去屏蔽氧化層"]],
+    note: "<b>通道效應四種對策：</b>屏蔽氧化層、晶圓傾斜 7°、預先非晶化、晶棒切割偏角。<b>單井缺點：</b>Vth 不對稱（+0.5 V／−0.75 V）。" },
+  { code: "02", title: "淺溝槽隔離 STI", en: "Shallow Trench Isolation", mask: "#3", zone: "薄膜・微影・蝕刻・CMP",
+    why: "在電晶體之間挖溝填氧化物做<b>電性隔離</b>，取代會長「鳥嘴」的 LOCOS。Si₃N₄ 是 <b>CMP 停止層</b>，底下的墊氧化層用來<b>緩衝氮化矽應力</b>。",
+    phases: [[0, "墊氧化層＋Si₃N₄ 沉積"], [0.15, "微影：光阻蓋住主動區"], [0.3, "蝕刻淺溝 0.3–0.45 µm；去光阻"], [0.5, "Liner oxide＋HDP-CVD 填 SiO₂"], [0.7, "CMP 磨到 Si₃N₄ 停止（摩擦力變化偵測終點）"], [0.85, "熱磷酸 160–180 °C 去 Si₃N₄；HF 去墊氧"]],
+    note: "<b>為什麼要墊氧化層？</b>Si₃N₄ 應力大，直接長在矽上會讓晶圓翹曲、矽龜裂。" },
+  { code: "03", title: "逆向井／Vth 調整", en: "Retrograde well & Vth adjust", mask: "—", zone: "佈植",
+    why: "以不同能量佈植，做出<b>越深越濃</b>的井：深處抑制 <b>Latch-up</b>、中段抑制 <b>punch-through</b>、表面極淺佈植調整 <b>Vth</b>。",
+    phases: [[0, "熱氧化（防通道效應）"], [0.1, "NMOS 側多段能量佈植"], [0.5, "PMOS 側多段能量佈植"], [0.85, "退火；去氧化層"]],
+    note: "講義 p.26 與 10/12 上課都把逆向井排在 <b>STI 之後</b>。" },
+  { code: "04", title: "閘極結構", en: "Gate oxide + polysilicon gate", mask: "#4", zone: "熱製程・薄膜・微影・蝕刻",
+    why: "RCA 清洗後熱長 <b>閘極氧化層 1.5–5 nm</b>（全製程品質要求最嚴），再沉積約 300 nm <b>多晶矽</b>。閘極蝕刻是<b>最關鍵的蝕刻</b>，需要高選擇比。",
+    phases: [[0, "RCA 清洗；乾式熱氧化長 gate oxide"], [0.15, "LPCVD 多晶矽 ~300 nm"], [0.35, "ARC 抗反射層＋微影"], [0.5, "Cl₂/HBr 電漿蝕刻多晶矽（停在薄氧化層）"], [0.75, "去光阻／ARC"]],
+    note: "<b>為什麼用多晶矽不用鋁？</b>鋁閘撐不過後面的高溫退火；多晶矽可以當自我對準的佈植遮罩。" },
+  { code: "05", title: "輕摻雜汲極 LDD", en: "Lightly Doped Drain implants", mask: "#5 #6", zone: "微影・佈植",
+    why: "在閘極兩側先做<b>淺、淡</b>的摻雜，分擔汲極端的高電場，<b>降低熱載子效應</b>。閘極本身就是遮罩（自我對準）。",
+    phases: [[0, "光阻蓋 PMOS 區"], [0.08, "n⁻ LDD 佈植（As）"], [0.45, "換光阻蓋 NMOS 區"], [0.55, "p⁻ LDD 佈植（BF₂：質量大→接面淺）"], [0.9, "去光阻"]],
+    note: "<b>熱載子：</b>E = V/L，通道越短電場越強，載子撞進閘極氧化層造成 Vth 漂移。LDD 是治標，<b>降低 VDD</b> 才是治本；VDD 降下來後 LDD 改稱 SDE。" },
+  { code: "06", title: "側壁間隙壁", en: "Sidewall spacer", mask: "無光罩", zone: "薄膜・蝕刻",
+    why: "全面沉積氧化物（或氮化物），再用<b>非等向性電漿回蝕</b>，只在閘極側壁留下 spacer。它<b>保護底下的 LDD</b>，讓之後的重摻雜離閘極邊緣一段距離。",
+    phases: [[0, "CVD 全面沉積 SiO₂"], [0.45, "非等向性回蝕（etch back）"], [0.85, "閘極兩側留下 spacer"]],
+    note: "<b>考點：</b>Spacer 回蝕和 Salicide 都是<b>自我對準</b>，不需要光罩。" },
+  { code: "07", title: "源／汲極佈植＋RTA", en: "N⁺ / P⁺ S/D implants + RTA", mask: "#7 #8", zone: "微影・佈植・熱製程",
+    why: "高濃度、較深的佈植做出<b>低電阻的源極／汲極</b>，spacer 擋住的地方保留 LDD。最後用 <b>RTA 快速退火</b>修復晶格並活化雜質，同時避免雜質擴散太多。",
+    phases: [[0, "光阻蓋 PMOS；n⁺ S/D 佈植（As）"], [0.45, "換光阻蓋 NMOS；p⁺ S/D 佈植（B）"], [0.85, "去光阻；RTA 快速熱退火"]],
+    note: "做完 S/D，<b>前段製程 FEOL</b> 的電晶體本體就完成了。" },
+  { code: "08", title: "自對準矽化物", en: "Salicide (TiSi₂)", mask: "無光罩", zone: "金屬化・熱製程",
+    why: "PVD 鍍 Ti 後退火，Ti 只和<b>裸露的矽</b>（S/D、閘極頂）反應成 <b>TiSi₂</b>，降低接觸電阻；氧化物上的 Ti 不反應，用化學蝕刻洗掉。",
+    phases: [[0, "PVD 沉積 Ti"], [0.4, "退火：Ti + 2Si → TiSi₂"], [0.65, "SPM 洗掉未反應的 Ti"]],
+    note: "先進製程改用 CoSi₂、NiSi。矽化物也能避免鋁直接接觸矽造成的 <b>spiking</b>。" },
+  { code: "09", title: "局部互連（接觸窗）", en: "Local interconnect · W plug", mask: "#9", zone: "薄膜・CMP・金屬化",
+    why: "先鍍 Si₃N₄（<b>接觸窗蝕刻停止層 CESL</b>），再沉積 <b>PSG</b>（磷捕捉 Na⁺/K⁺）並 CMP 磨平，蝕刻接觸窗後填 <b>Ti／TiN／W</b>，W CMP 磨掉多餘的鎢。",
+    phases: [[0, "Si₃N₄ CESL"], [0.15, "PSG 沉積＋CMP 平坦化"], [0.45, "微影＋蝕刻接觸窗"], [0.6, "Ti 附著層／TiN 阻擋層／W-CVD 填孔"], [0.85, "W CMP（大馬士革）"]],
+    note: "<b>為什麼孔用 W？</b>W-CVD 階梯覆蓋率接近 100%，能填滿深孔；導線則用電阻較低的 Al-Cu。" },
+  { code: "10", title: "ILD-1 與 Via-1", en: "Inter-layer dielectric + via plug", mask: "#10", zone: "薄膜・CMP・金屬化",
+    why: "沉積約 800 nm 的層間介電層並 CMP 磨平，再蝕刻 <b>Via</b>、填 W 插塞，連接下方接觸窗與上方第一層金屬。",
+    phases: [[0, "ILD-1 CVD SiO₂"], [0.3, "CMP 平坦化（給微影足夠景深 DOF）"], [0.5, "微影＋蝕刻 Via-1"], [0.65, "Ti／TiN／W 填孔＋W CMP"]],
+    note: "<b>老師：</b>沒有 CMP 的年代表面高低差太大，最多只能做約兩層金屬。" },
+  { code: "11", title: "第一層金屬 M1", en: "Metal-1 · Al-Cu", mask: "#11", zone: "金屬化・微影・蝕刻",
+    why: "濺鍍 <b>Ti／TiN／Al-Cu／TiN</b> 三明治，再微影＋金屬蝕刻成導線。這裡接出反相器的 <b>VDD、GND、輸入（兩個閘極）與輸出（兩個汲極）</b>。",
+    phases: [[0, "PVD：Ti＋TiN＋Al-Cu（Cu 0.5–1%）＋TiN"], [0.35, "微影定義導線"], [0.5, "BCl₃／Cl₂ 電漿蝕刻金屬"], [0.8, "去光阻"]],
+    note: "<b>加 Cu：</b>抗電致遷移（electromigration）。頂層 TiN 兼抗反射與抗電致遷移。" },
+  { code: "12", title: "ILD-2 與 Via-2", en: "Gap fill + ILD-2 + via-2", mask: "#12", zone: "薄膜・CMP・金屬化",
+    why: "金屬線之間先做 <b>gap fill</b>，再沉積 ILD-2、CMP、蝕刻 Via-2、填 W，流程和上一層相同，一層一層往上疊。",
+    phases: [[0, "Gap fill＋ILD-2 沉積"], [0.3, "CMP 平坦化"], [0.5, "蝕刻 Via-2"], [0.65, "W 填孔＋W CMP"]],
+    note: "後段製程 <b>BEOL</b> 就是「介電層 → 通孔 → 金屬」的迴圈。" },
+  { code: "13", title: "第二層金屬 M2", en: "Metal-2", mask: "#13", zone: "金屬化・微影・蝕刻",
+    why: "重複 M1 的流程。上下層導線通常<b>互相垂直</b>走線；之後還有 M3、M4…，最上層會做成焊墊（bond pad）。",
+    phases: [[0, "PVD 金屬堆疊"], [0.35, "微影"], [0.5, "金屬蝕刻"], [0.8, "去光阻"]],
+    note: "<b>演進：</b>0.13 µm 之後改用 <b>Cu＋Low-k＋雙大馬士革</b>（Cu 難乾蝕刻，要用電鍍＋CMP；需 Ta/TaN 阻擋層防銅擴散）。" },
+  { code: "14", title: "鈍化層與焊墊", en: "Passivation + bond pad opening", mask: "#14 #15", zone: "薄膜・微影・蝕刻",
+    why: "最上面鍍氧化層（緩和應力）＋ <b>Si₃N₄ 鈍化層</b>，擋住<b>濕氣、刮傷、Na⁺ 等污染</b>；再微影蝕刻開出焊墊窗口，讓探針和打線接上去。",
+    phases: [[0, "氧化層（緩衝氮化矽應力）"], [0.3, "Si₃N₄ 鈍化層"], [0.6, "微影＋蝕刻開焊墊窗"]],
+    note: "Si₃N₄ 阻擋水氣與鹼金屬離子的能力比 SiO₂ 好很多。" },
+  { code: "15", title: "WAT／CP 測試", en: "Wafer acceptance test · chip probe", mask: "—", zone: "測試",
+    why: "<b>WAT（PCM）</b>量切割道上的 test key（Vth、Ion/Ioff、片電阻、接觸電阻…），是代工廠<b>交貨收費的依據</b>；<b>CP</b> 用探針卡逐顆測功能，挑出 good die。",
+    phases: [[0, "WAT：量測切割道 test key 的製程參數"], [0.25, "CP：探針卡接觸焊墊"], [0.55, "測試向量通過，標記 good die"]],
+    note: "<b>責任歸屬：</b>WAT 合格但 CP 大量失效，通常算<b>設計端</b>的問題。" }
+];
+const N = STEPS.length;
+
+/* ---------- materials ---------- */
+const MAT = {
+  sub:   { c: "#4e5870", name: "P⁺ 基板" },
+  epi:   { c: "#7d889f", name: "P⁻ 磊晶矽" },
+  nwell: { c: "#6fb9ab", name: "N-well" },
+  pwell: { c: "#a996cf", name: "P-well" },
+  nm:    { c: "#3f9e8e", name: "n⁻ LDD", alias: "nwell" },
+  pm:    { c: "#8a70bd", name: "p⁻ LDD", alias: "pwell" },
+  np:    { c: "#167464", name: "n⁺ 源/汲極" },
+  pp:    { c: "#62449c", name: "p⁺ 源/汲極" },
+  band:  { c: "#2f4f6f", name: "逆向井高濃度區" },
+  ox:    { c: "#cfe4f2", name: "SiO₂ 氧化物", o: .55 },
+  sti:   { c: "#dce9f2", name: "STI 氧化物", o: .92 },
+  nit:   { c: "#e5c766", name: "Si₃N₄ 氮化矽", o: .8 },
+  pas:   { c: "#e5c766", name: "Si₃N₄ 鈍化層", o: .4 },
+  poly:  { c: "#c2583f", name: "多晶矽閘極" },
+  pr:    { c: "#f2b33d", name: "光阻", o: .55 },
+  ti:    { c: "#9aa1ab", name: "Ti（未反應）", metal: true },
+  sil:   { c: "#3d424c", name: "TiSi₂ 矽化物", metal: true },
+  psg:   { c: "#bfd8ea", name: "PSG／ILD 介電層", o: .2 },
+  w:     { c: "#8d99a8", name: "W 鎢插塞", metal: true },
+  al:    { c: "#d9dde3", name: "Al-Cu 金屬", metal: true },
+  probe: { c: "#e8e2d0", name: "探針", metal: true }
+};
+const DIEL = new Set(["ox", "psg", "nit", "pas"]);
+
+/* ---------- timing helpers: T is absolute time, step S + fraction ---------- */
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const R = (S, a, b) => T => clamp((T - S - a) / (b - a), 0, 1);
+const IN = (S, a = 0, b = 1) => R(S, a, b);
+const OUT = (S, a, b) => { const f = R(S, a, b); return T => 1 - f(T); };
+const WIN = (S1, a1, b1, S2, a2, b2) => { const f = R(S1, a1, b1), g = R(S2, a2, b2); return T => Math.min(f(T), 1 - g(T)); };
+
+/* ---------- fallback when WebGL / three is missing ---------- */
+const stage = document.querySelector(".stage");
+function fail(msg) {
+  const d = document.createElement("div"); d.className = "fallback"; d.textContent = msg; stage.appendChild(d);
+}
+if (!window.THREE) { fail("3D 函式庫沒有載入，請重新整理頁面。"); buildPanelOnly(); return; }
+
+/* ---------- three.js scene ---------- */
+const canvas = document.getElementById("gl");
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true }); }
+catch (e) { fail("這個瀏覽器不支援 WebGL，無法顯示 3D 模型。"); buildPanelOnly(); return; }
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.outputEncoding = THREE.sRGBEncoding;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 200);
+const HOME = new THREE.Vector3(13.5, 9.5, 15.5), TARGET = new THREE.Vector3(0, 0.2, 0);
+camera.position.copy(HOME);
+const controls = new THREE.OrbitControls(camera, canvas);
+controls.target.copy(TARGET); controls.enableDamping = true; controls.dampingFactor = 0.08;
+controls.minDistance = 7; controls.maxDistance = 45; controls.autoRotateSpeed = 0.8;
+
+scene.add(new THREE.HemisphereLight(0xdfe8f2, 0x1a1f26, 0.75));
+const key = new THREE.DirectionalLight(0xffffff, 0.85); key.position.set(8, 14, 10); scene.add(key);
+const rim = new THREE.DirectionalLight(0x9fb6d0, 0.35); rim.position.set(-10, 6, -8); scene.add(rim);
+const heat = new THREE.PointLight(0xff7a2e, 0, 30); heat.position.set(0, 4, 4); scene.add(heat);
+
+const objects = [];
+const visKeys = {};
+function box(x0, x1, y0, y1, z0, z1, mk, vis, opt = {}) {
+  const w = x1 - x0, h = y1 - y0, d = z1 - z0;
+  const g = new THREE.BoxGeometry(w, h, d);
+  const anchorTop = opt.anchor === "top";
+  g.translate(0, anchorTop ? -h / 2 : h / 2, 0);
+  const m = MAT[mk];
+  const mat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(m.c).convertSRGBToLinear(),
+    roughness: m.metal ? 0.35 : 0.8, metalness: m.metal ? 0.45 : 0.0,
+    transparent: m.o !== undefined || opt.mode === "fade", opacity: m.o ?? 1,
+    depthWrite: m.o === undefined || m.o > 0.6
+  });
+  const mesh = new THREE.Mesh(g, mat);
+  mesh.position.set((x0 + x1) / 2, anchorTop ? y1 : y0, (z0 + z1) / 2);
+  if (m.o !== undefined && m.o < 0.6) mesh.renderOrder = 2;
+  if (!m.o || m.o > 0.6) {
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color: 0x0b0e12, transparent: true, opacity: 0.35 }));
+    mesh.add(edges); mesh.userData.edges = edges;
+  }
+  scene.add(mesh);
+  const o = { mesh, mat, mk, vis, mode: opt.mode || "grow", base: m.o ?? 1, color: opt.color };
+  objects.push(o);
+  return o;
+}
+
+/* geometry plan (x: -6..6, z: -3..3, y up; surface y=0) */
+const Z0 = -3, Z1 = 3, ZP0 = -3.012, ZP1 = 3.012; // ZP = slightly proud faces for doped regions
+const L = [-6, 0], Rr = [0, 6];
+const STI = [[-6, -5.4], [-0.6, 0.6], [5.4, 6]];
+const ACT = [[-5.4, -0.6], [0.6, 5.4]];
+const GATE = [[-3.35, -2.65], [2.65, 3.35]];
+const SP = 0.18;
+const always = () => 1;
+
+/* step 0: substrate + epi; step 1 recolors epi into wells */
+box(-6, 6, -3.2, -1.6, Z0, Z1, "sub", IN(0, 0, .25));
+box(-6, 6, -1.6, -1.3, Z0, Z1, "epi", IN(0, .3, .8));
+const wellColor = (S, a, b, to) => ({ fn: R(S, a, b), to });
+const leftC = wellColor(1, .3, .45, "nwell"), rightC = wellColor(1, .65, .8, "pwell");
+for (const [half, col] of [[L, leftC], [Rr, rightC]]) {
+  box(half[0], half[1], -1.3, -0.55, Z0, Z1, "epi", IN(0, .3, .8), { color: col });
+}
+// top silicon: active regions + trench silicon (etched away in STI step)
+for (const a of ACT) box(a[0], a[1], -0.55, 0, Z0, Z1, "epi", IN(0, .3, .8), { color: a[0] < 0 ? leftC : rightC });
+const trenchSi = [[-6, -5.4], [-0.6, 0], [0, 0.6], [5.4, 6]];
+for (const s of trenchSi) {
+  box(s[0], s[1], -0.55, 0, Z0, Z1, "epi", WIN(0, .3, .8, 2, .3, .48), { color: s[0] < 0 ? leftC : rightC });
+}
+
+/* step 1: screen oxide, photoresist, implants */
+box(-6, 6, 0, 0.04, Z0, Z1, "ox", WIN(1, 0, .08, 1, .88, .98));
+box(0, 6, 0.04, 0.7, Z0, Z1, "pr", WIN(1, .08, .15, 1, .42, .47), { mode: "fade" });
+box(-6, 0, 0.04, 0.7, Z0, Z1, "pr", WIN(1, .48, .55, 1, .82, .87), { mode: "fade" });
+
+/* step 2: STI */
+const spans = [[-6, -5.4], [-5.4, -0.6], [-0.6, 0.6], [0.6, 5.4], [5.4, 6]];
+for (const s of spans) {
+  const isTrench = s[1] - s[0] < 2;
+  const gone = isTrench ? OUT(2, .3, .45) : OUT(2, .88, .97);
+  box(s[0], s[1], 0, 0.04, Z0, Z1, "ox", T => Math.min(IN(2, 0, .07)(T), isTrench ? OUT(2, .3, .38)(T) : OUT(2, .93, .99)(T)));
+  box(s[0], s[1], 0.04, 0.2, Z0, Z1, "nit", T => Math.min(IN(2, .05, .15)(T), gone(T)));
+}
+for (const a of ACT) box(a[0], a[1], 0.2, 0.55, Z0, Z1, "pr", WIN(2, .15, .22, 2, .45, .5), { mode: "fade" });
+for (const s of STI) {
+  box(s[0], s[1], -0.55, 0, Z0, Z1, "sti", IN(2, .5, .62));
+  box(s[0], s[1], 0, 0.2, Z0, Z1, "sti", WIN(2, .6, .66, 2, .9, .98));
+}
+box(-6, 6, 0.2, 0.5, Z0, Z1, "ox", WIN(2, .6, .7, 2, .72, .84));
+
+/* step 3: retrograde band + Vth adjust */
+box(-5.4, -0.6, 0, 0.03, Z0, Z1, "ox", WIN(3, 0, .08, 3, .9, .98));
+box(0.6, 5.4, 0, 0.03, Z0, Z1, "ox", WIN(3, 0, .08, 3, .9, .98));
+box(-6, 0, 0.03, 0.7, Z0, Z1, "pr", WIN(3, .08, .12, 3, .44, .48), { mode: "fade" });
+box(0, 6, 0.03, 0.7, Z0, Z1, "pr", WIN(3, .48, .52, 3, .84, .88), { mode: "fade" });
+box(0.6, 5.4, -1.05, -0.85, ZP0, ZP1, "band", IN(3, .2, .42), { mode: "fade" });
+box(-5.4, -0.6, -1.05, -0.85, ZP0, ZP1, "band", IN(3, .6, .82), { mode: "fade" });
+
+/* step 4: gate oxide + poly, etched to gates */
+const gx = [[-6, -3.35], [-2.65, 2.65], [3.35, 6]];
+for (const g of GATE) {
+  box(g[0], g[1], 0, 0.06, Z0, Z1, "ox", IN(4, 0, .15));
+  box(g[0], g[1], 0.06, 0.76, Z0, Z1, "poly", IN(4, .15, .35));
+  box(g[0], g[1], 0.76, 0.95, Z0, Z1, "pr", WIN(4, .38, .48, 4, .78, .86), { mode: "fade" });
+}
+for (const g of gx) {
+  box(g[0], g[1], 0, 0.06, Z0, Z1, "ox", WIN(4, 0, .15, 4, .66, .74));
+  box(g[0], g[1], 0.06, 0.76, Z0, Z1, "poly", WIN(4, .15, .35, 4, .5, .68));
+}
+
+/* step 5: LDD (inner pieces stay under spacer, outer pieces replaced by S/D) */
+const lddR = [[0.6, 2.65], [3.35, 5.4]], lddL = [[-5.4, -3.35], [-2.65, -0.6]];
+function ldd(sp, mk, vis) {
+  const [a, b] = sp, gateSideRight = Math.abs(b - 2.65) < .01 || Math.abs(b + 3.35) < .01; // gate on the right of this piece
+  const inner = gateSideRight ? [b - SP, b] : [a, a + SP];
+  const outer = gateSideRight ? [a, b - SP] : [a + SP, b];
+  box(inner[0], inner[1], -0.18, 0.003, ZP0, ZP1, mk, vis, { anchor: "top", mode: "fade" });
+  const gone = a > 0 ? OUT(7, .22, .38) : OUT(7, .65, .8);
+  box(outer[0], outer[1], -0.18, 0.003, ZP0, ZP1, mk, T => Math.min(vis(T), gone(T)), { anchor: "top", mode: "fade" });
+}
+box(-6, 0, 0, 1.0, Z0, Z1, "pr", WIN(5, 0, .08, 5, .4, .45), { mode: "fade" });
+box(0, 6, 0, 1.0, Z0, Z1, "pr", WIN(5, .45, .52, 5, .88, .95), { mode: "fade" });
+for (const s of lddR) ldd(s, "nm", IN(5, .25, .4));
+for (const s of lddL) ldd(s, "pm", IN(5, .7, .85));
+
+/* step 6: spacer */
+box(-6, 6, 0, 0.95, Z0, Z1, "ox", WIN(6, 0, .4, 6, .45, .85));
+for (const g of GATE) {
+  box(g[0] - SP, g[0], 0, 0.7, Z0, Z1, "ox", IN(6, .45, .7));
+  box(g[1], g[1] + SP, 0, 0.7, Z0, Z1, "ox", IN(6, .45, .7));
+}
+
+/* step 7: S/D + RTA */
+const sdR = [[0.6, 2.47], [3.53, 5.4]], sdL = [[-5.4, -3.53], [-2.47, -0.6]];
+box(-6, 0, 0, 1.0, Z0, Z1, "pr", WIN(7, 0, .06, 7, .4, .45), { mode: "fade" });
+box(0, 6, 0, 1.0, Z0, Z1, "pr", WIN(7, .45, .5, 7, .82, .87), { mode: "fade" });
+for (const s of sdR) box(s[0], s[1], -0.4, 0.004, ZP0 - .004, ZP1 + .004, "np", IN(7, .22, .38), { anchor: "top", mode: "fade" });
+for (const s of sdL) box(s[0], s[1], -0.4, 0.004, ZP0 - .004, ZP1 + .004, "pp", IN(7, .65, .8), { anchor: "top", mode: "fade" });
+
+/* step 8: salicide */
+const siTop = [...sdR, ...sdL];
+const silColor = { fn: R(8, .42, .62), to: "sil" };
+for (const s of siTop) box(s[0], s[1], 0.004, 0.05, Z0, Z1, "ti", IN(8, 0, .3), { color: silColor });
+for (const g of GATE) box(g[0], g[1], 0.76, 0.82, Z0, Z1, "ti", IN(8, 0, .3), { color: silColor });
+for (const s of STI) box(s[0], s[1], 0.0, 0.05, Z0, Z1, "ti", WIN(8, 0, .3, 8, .65, .85));
+for (const g of GATE) {
+  box(g[0] - SP, g[0], 0.7, 0.75, Z0, Z1, "ti", WIN(8, 0, .3, 8, .65, .85));
+  box(g[1], g[1] + SP, 0.7, 0.75, Z0, Z1, "ti", WIN(8, 0, .3, 8, .65, .85));
+}
+
+/* step 9: CESL + PSG + W contacts */
+box(-6, 6, 0.05, 0.13, Z0, Z1, "nit", IN(9, 0, .15), { mode: "fade" });
+box(-6, 6, 0.13, 1.3, Z0, Z1, "psg", IN(9, .15, .4));
+const ZC = 1.2, ZG = -2.2, HW = 0.2;
+const cSD = [-4.5, -1.5, 1.5, 4.5];
+for (const x of cSD) box(x - HW, x + HW, 0.05, 1.3, ZC - HW, ZC + HW, "w", IN(9, .6, .85));
+for (const x of [-3, 3]) box(x - HW, x + HW, 0.82, 1.3, ZG - HW, ZG + HW, "w", IN(9, .6, .85));
+
+/* step 10: ILD-1 + via-1 */
+box(-6, 6, 1.3, 2.1, Z0, Z1, "psg", IN(10, 0, .3));
+for (const x of cSD) box(x - HW, x + HW, 1.3, 2.1, ZC - HW, ZC + HW, "w", IN(10, .65, .9));
+for (const x of [-3, 3]) box(x - HW, x + HW, 1.3, 2.1, ZG - HW, ZG + HW, "w", IN(10, .65, .9));
+
+/* step 11: M1 — VDD, GND, IN (gates), OUT (drains) */
+box(-6, 6, 2.1, 2.35, Z0, Z1, "al", WIN(11, 0, .3, 11, .5, .62), { mode: "fade" });
+const M1 = [
+  [-4.85, -4.15, -3, 3],   // VDD rail to PMOS source
+  [4.15, 4.85, -3, 3],     // GND rail to NMOS source
+  [-3.3, 3.3, ZG - .32, ZG + .32], // input: both gates
+  [-1.8, 1.8, ZC - .32, ZC + .32]  // output: both drains
+];
+for (const m of M1) {
+  box(m[0] - .004, m[1] + .004, 2.1, 2.354, m[2] - .004, m[3] + .004, "al", IN(11, .5, .62), { mode: "fade" });
+  box(m[0], m[1], 2.35, 2.6, m[2], m[3], "pr", WIN(11, .35, .45, 11, .8, .9), { mode: "fade" });
+}
+
+/* step 12: ILD-2 + via-2 */
+box(-6, 6, 2.1, 3.15, Z0, Z1, "psg", IN(12, 0, .3));
+const V2 = [[-1, ZG], [1, ZC]];
+for (const [x, z] of V2) box(x - HW, x + HW, 2.35, 3.15, z - HW, z + HW, "w", IN(12, .65, .9));
+
+/* step 13: M2 (runs along z, perpendicular to M1) */
+box(-6, 6, 3.15, 3.4, Z0, Z1, "al", WIN(13, 0, .3, 13, .5, .62), { mode: "fade" });
+const M2 = [[-1.3, -0.7, -3, -1.6], [0.7, 1.3, 0.6, 1.6], [0.6, 2.8, 1.4, 2.9]];
+for (const m of M2) {
+  box(m[0] - .004, m[1] + .004, 3.15, 3.404, m[2] - .004, m[3] + .004, "al", IN(13, .5, .62), { mode: "fade" });
+  box(m[0], m[1], 3.4, 3.65, m[2], m[3], "pr", WIN(13, .35, .45, 13, .8, .9), { mode: "fade" });
+}
+
+/* step 14: passivation with pad opening (x 0.9..2.5, z 1.7..2.6) */
+box(-6, 6, 3.15, 3.4, Z0, Z1, "psg", IN(14, 0, .15));
+const OP = [0.9, 2.5, 1.7, 2.6];
+const pieces = [[-6, 6, -3, OP[2]], [-6, 6, OP[3], 3], [-6, OP[0], OP[2], OP[3]], [OP[1], 6, OP[2], OP[3]]];
+for (const p of pieces) {
+  box(p[0], p[1], 3.4, 3.55, p[2], p[3], "psg", IN(14, .1, .3));
+  box(p[0], p[1], 3.55, 3.8, p[2], p[3], "pas", IN(14, .3, .55));
+}
+box(OP[0], OP[1], 3.4, 3.55, OP[2], OP[3], "psg", WIN(14, .1, .3, 14, .72, .9));
+box(OP[0], OP[1], 3.55, 3.8, OP[2], OP[3], "pas", WIN(14, .3, .55, 14, .62, .75));
+
+/* step 15: probe needle */
+const probeGeo = new THREE.ConeGeometry(0.12, 3.2, 20); probeGeo.translate(0, -1.6, 0); probeGeo.rotateX(Math.PI);
+const probeMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(MAT.probe.c).convertSRGBToLinear(), metalness: .6, roughness: .3 });
+const probe = new THREE.Mesh(probeGeo, probeMat); probe.rotation.z = -0.35; scene.add(probe);
+const probeArm = new THREE.Mesh(new THREE.BoxGeometry(3, .12, .3), probeMat); scene.add(probeArm);
+
+/* ion beam particles */
+const IONS = [
+  { S: 1, a: .15, b: .42, x: L,  y: -0.3, c: "#6fe0c8" },
+  { S: 1, a: .55, b: .82, x: Rr, y: -0.3, c: "#c3a8ff" },
+  { S: 3, a: .12, b: .44, x: Rr, y: -0.9, c: "#c3a8ff" },
+  { S: 3, a: .52, b: .84, x: L,  y: -0.9, c: "#6fe0c8" },
+  { S: 5, a: .08, b: .4,  x: Rr, y: 0, c: "#6fe0c8" },
+  { S: 5, a: .52, b: .88, x: L,  y: 0, c: "#c3a8ff" },
+  { S: 7, a: .06, b: .4,  x: Rr, y: 0, c: "#6fe0c8" },
+  { S: 7, a: .5,  b: .82, x: L,  y: 0, c: "#c3a8ff" }
+];
+const NP = 700;
+const pGeo = new THREE.BufferGeometry();
+const pPos = new Float32Array(NP * 3), seeds = [];
+for (let i = 0; i < NP; i++) seeds.push([Math.random(), Math.random(), Math.random()]);
+pGeo.setAttribute("position", new THREE.BufferAttribute(pPos, 3));
+const pMat = new THREE.PointsMaterial({ size: 0.07, color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false });
+const ions = new THREE.Points(pGeo, pMat); ions.renderOrder = 5; scene.add(ions);
+
+/* labels */
+const LABELS = [
+  { t: "N-well（PMOS）", p: [-3, -1.0, 3], v: T => T >= 1.5 && T < 4 },
+  { t: "P-well（NMOS）", p: [3, -1.0, 3], v: T => T >= 1.9 && T < 4 },
+  { t: "STI", p: [0, 0.05, 3], v: T => T >= 2.65 && T < 9 },
+  { t: "多晶矽閘極", p: [3, 0.8, 3], v: T => T >= 4.4 && T < 6 },
+  { t: "LDD", p: [2.2, 0, 3], v: T => T >= 5.4 && T < 6.5 },
+  { t: "Spacer", p: [2.5, 0.72, 3], v: T => T >= 6.6 && T < 7 },
+  { t: "n⁺ 汲極", p: [1.5, 0, 3], v: T => T >= 7.4 && T < 9 },
+  { t: "p⁺ 源極", p: [-4.5, 0, 3], v: T => T >= 7.8 && T < 9 },
+  { t: "TiSi₂", p: [3, 0.85, 3], v: T => T >= 8.6 && T < 9 },
+  { t: "W 接觸窗", p: [1.5, 1.3, 1.2], v: T => T >= 9.8 && T < 11 },
+  { t: "VDD", p: [-4.5, 2.35, 3], v: T => T >= 11.75 && T < 14 },
+  { t: "GND", p: [4.5, 2.35, 3], v: T => T >= 11.75 && T < 14 },
+  { t: "輸入 IN", p: [3.3, 2.35, ZG], v: T => T >= 11.75 && T < 12.3 },
+  { t: "輸出 OUT", p: [0, 2.35, ZC + .3], v: T => T >= 11.75 && T < 12.3 },
+  { t: "M2", p: [1.7, 3.4, 2.9], v: T => T >= 13.75 && T < 14.3 },
+  { t: "焊墊 Bond pad", p: [1.7, 3.8, 2.15], v: T => T >= 14.9 },
+  { t: "Si₃N₄ 鈍化層", p: [-4, 3.8, 3], v: T => T >= 14.55 && T < 15 }
+];
+const labelsEl = document.getElementById("labels");
+for (const l of LABELS) { const d = document.createElement("div"); d.className = "lbl"; d.textContent = l.t; labelsEl.appendChild(d); l.el = d; }
+
+/* ---------- state ---------- */
+let T = 0, playing = false, speed = 1, hideDiel = false, showLabels = true, autoRot = false, stepPause = true;
+const STEP_SECONDS = 8;
+const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const tmpC = new THREE.Color(), cache = {};
+const lin = k => cache[k] || (cache[k] = new THREE.Color(MAT[k].c).convertSRGBToLinear());
+
+function applyScene() {
+  const used = new Set();
+  for (const o of objects) {
+    let v = o.vis(T);
+    if (hideDiel && DIEL.has(o.mk)) v = 0;
+    const on = v > 0.002;
+    o.mesh.visible = on;
+    if (!on) continue;
+    let mk = o.mk;
+    if (o.mode === "grow") { o.mesh.scale.y = Math.max(v, 0.001); o.mat.opacity = o.base; }
+    else { o.mesh.scale.y = 1; o.mat.opacity = o.base * v; o.mat.transparent = true; if (o.mesh.userData.edges) o.mesh.userData.edges.material.opacity = 0.35 * v; }
+    if (o.color) {
+      const k = o.color.fn(T);
+      tmpC.copy(lin(o.mk)).lerp(lin(o.color.to), k); o.mat.color.copy(tmpC);
+      if (k > 0.5) mk = o.color.to;
+    }
+    used.add(mk);
+  }
+  // ions
+  const act = IONS.find(I => T >= I.S + I.a && T <= I.S + I.b);
+  if (act) {
+    const span = (T - act.S - act.a) / (act.b - act.a);
+    const fade = Math.min(1, span * 8, (1 - span) * 8);
+    pMat.color.set(act.c); pMat.opacity = 0.9 * fade;
+    for (let i = 0; i < NP; i++) {
+      const s = seeds[i], ph = (span * 6 + s[2]) % 1;
+      pPos[i * 3] = act.x[0] + 0.15 + s[0] * (act.x[1] - act.x[0] - 0.3);
+      pPos[i * 3 + 1] = 5 - ph * (5 - act.y);
+      pPos[i * 3 + 2] = -2.9 + s[1] * 5.8;
+    }
+    pGeo.attributes.position.needsUpdate = true; ions.visible = true;
+  } else ions.visible = false;
+  // anneal / RTA glow
+  const pulse = (S, a, b) => { const x = R(S, a, b)(T); return x > 0 && x < 1 ? Math.sin(x * Math.PI) : 0; };
+  heat.intensity = 3.2 * Math.max(pulse(1, .85, 1), pulse(3, .85, 1), pulse(7, .86, 1), pulse(8, .4, .62));
+  // probe
+  const pd = R(15, .25, .55)(T);
+  const pv = T >= 15.05;
+  probe.visible = probeArm.visible = pv;
+  const py = 3.8 + (1 - pd) * 3.5;
+  probe.position.set(1.7, py, 2.15); probeArm.position.set(1.7 + 1.1 + 1.4, py + 3.0, 2.15);
+  if (pv) used.add("probe");
+  if (ions.visible) used.add("_ion");
+  return used;
+}
+
+/* ---------- panel ---------- */
+const $ = id => document.getElementById(id);
+const legendEl = $("legend");
+const LEG_KEYS = ["sub", "epi", "nwell", "pwell", "band", "sti", "ox", "nit", "pr", "poly", "nm", "pm", "np", "pp", "ti", "sil", "psg", "w", "al", "pas", "probe"];
+const legItems = {};
+for (const k of LEG_KEYS) {
+  const d = document.createElement("div"); d.innerHTML = `<i style="background:${MAT[k].c}"></i><span></span>`;
+  d.querySelector("span").textContent = MAT[k].name; legendEl.appendChild(d); legItems[k] = d;
+}
+const stepList = $("stepList");
+STEPS.forEach((s, i) => {
+  const li = document.createElement("li"); const b = document.createElement("button");
+  b.innerHTML = `<span class="n">${s.code}</span><span></span><span class="m"></span>`;
+  b.children[1].textContent = s.title; b.children[2].textContent = s.mask === "—" ? "" : s.mask;
+  b.addEventListener("click", () => { T = i; playing = true; syncPlay(); });
+  li.appendChild(b); stepList.appendChild(li); s.btn = b;
+});
+let shownStep = -1;
+function renderPanel(used) {
+  const s = clamp(Math.floor(T), 0, N - 1), f = T - s, st = STEPS[s];
+  if (s !== shownStep) {
+    shownStep = s;
+    $("cTitle").textContent = st.title; $("cEn").textContent = st.en;
+    $("cMask").textContent = st.mask === "—" || st.mask === "無光罩" ? (st.mask === "無光罩" ? "無光罩（自我對準）" : "光罩 —") : "光罩 " + st.mask;
+    $("cZone").textContent = st.zone; $("cWhy").innerHTML = st.why; $("cNote").innerHTML = st.note;
+    const ol = $("cPhases"); ol.innerHTML = "";
+    st.phases.forEach(p => { const li = document.createElement("li"); li.textContent = p[1]; ol.appendChild(li); });
+    $("hudCode").textContent = "STEP " + st.code + (st.mask !== "—" && st.mask !== "無光罩" ? "  ·  MASK " + st.mask : "");
+    $("hudName").textContent = st.title;
+    STEPS.forEach((x, i) => x.btn.classList.toggle("cur", i === s));
+  }
+  let cur = 0; st.phases.forEach((p, i) => { if (f >= p[0]) cur = i; });
+  if (T >= N - 0.001) cur = st.phases.length - 1;
+  [...$("cPhases").children].forEach((li, i) => { li.className = i < cur ? "done" : i === cur ? "now" : ""; });
+  $("hudPhase").textContent = st.phases[cur][1];
+  for (const k of LEG_KEYS) legItems[k].classList.toggle("off", !used.has(k));
+  $("tick").textContent = `${String(s).padStart(2, "0")}/${N - 1}`;
+  if (!scrubbing) $("scrub").value = Math.round(T / N * 1000);
+}
+
+/* ---------- controls ---------- */
+let scrubbing = false;
+function syncPlay() { $("bPlay").textContent = playing ? "❚❚ 暫停" : "▶ 播放"; }
+$("bPlay").addEventListener("click", () => { if (T >= N - 0.001) T = 0; playing = !playing; syncPlay(); });
+$("bPrev").addEventListener("click", () => { const s = Math.floor(T); T = (T - s < 0.15 && s > 0) ? s - 1 : s; playing = true; syncPlay(); });
+$("bNext").addEventListener("click", () => { T = Math.min(N - 0.001, Math.floor(T) + 1); if (T >= N - 0.001) playing = false; else playing = true; syncPlay(); });
+const sc = $("scrub");
+sc.addEventListener("input", () => { scrubbing = true; T = Math.min(N - 0.001, sc.value / 1000 * N); playing = false; syncPlay(); });
+sc.addEventListener("change", () => { scrubbing = false; });
+$("speed").addEventListener("change", e => { speed = +e.target.value; });
+function toggle(id, fn) { const b = $(id); b.addEventListener("click", () => { const v = b.getAttribute("aria-pressed") !== "true"; b.setAttribute("aria-pressed", v); fn(v); }); }
+toggle("tDiel", v => hideDiel = v);
+toggle("tLabels", v => { showLabels = v; labelsEl.hidden = !v; });
+toggle("tRotate", v => { autoRot = v; });
+toggle("tPause", v => { stepPause = v; });
+$("tReset").addEventListener("click", () => { camera.position.copy(HOME); controls.target.copy(TARGET); });
+window.addEventListener("keydown", e => {
+  if (e.target.closest && e.target.closest("input,select")) return;
+  if (e.code === "Space") { e.preventDefault(); $("bPlay").click(); }
+  else if (e.key === "ArrowRight") $("bNext").click();
+  else if (e.key === "ArrowLeft") $("bPrev").click();
+});
+
+/* stop at end of each step so it can be read */
+function advance(dt) {
+  if (!playing) return;
+  const prev = T;
+  T += dt * speed / STEP_SECONDS;
+  if (stepPause && Math.floor(T) > Math.floor(prev) && T < N) { T = Math.floor(T); playing = false; syncPlay(); }
+  if (T >= N - 0.001) { T = N - 0.001; playing = false; syncPlay(); }
+}
+
+/* ---------- loop ---------- */
+const v3 = new THREE.Vector3();
+function resize() {
+  const r = stage.getBoundingClientRect();
+  renderer.setSize(r.width, r.height, false);
+  camera.aspect = r.width / Math.max(1, r.height);
+  camera.fov = camera.aspect < 0.9 ? 50 : 36;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize); resize();
+let tPrev = performance.now();
+function frame(now) {
+  const dt = clamp((now - tPrev) / 1000, 0, 0.05); tPrev = now;
+  advance(reduced ? dt * 2 : dt);
+  controls.autoRotate = autoRot || (T > N - 0.01 && !reduced);
+  controls.update();
+  const used = applyScene();
+  renderPanel(used);
+  renderer.render(scene, camera);
+  if (showLabels) {
+    const r = stage.getBoundingClientRect();
+    for (const l of LABELS) {
+      const vis = l.v(T);
+      if (!vis) { l.el.style.opacity = 0; continue; }
+      v3.set(l.p[0], l.p[1], l.p[2]).project(camera);
+      l.el.style.left = ((v3.x + 1) / 2 * r.width) + "px";
+      l.el.style.top = ((1 - v3.y) / 2 * r.height - 10) + "px";
+      l.el.style.opacity = v3.z < 1 ? 1 : 0;
+    }
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+playing = !reduced; syncPlay();
+
+function buildPanelOnly() {
+  const ol = document.getElementById("stepList");
+  STEPS.forEach(s => { const li = document.createElement("li"); li.textContent = s.code + " " + s.title; ol.appendChild(li); });
+}
+})();
+</script>
